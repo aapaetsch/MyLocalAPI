@@ -555,6 +555,7 @@ function List-PlaybackDevices {
         $clfi = Get-Col $r $p
         break
       }
+    }
     if (-not $clfi) {
       foreach ($p in $r.PSObject.Properties.Name) {
         $val = Get-Col $r $p
@@ -597,6 +598,7 @@ function List-PlaybackDevices {
         Direction = $dir
         'Command-Line Friendly ID' = $anyClfi
         Raw = $r
+      }
     }
     if ($fallback.Count -gt 0) { $pick = $fallback }
   }
