@@ -21,10 +21,43 @@
 param(
   # [int]$Port = 8008,
   # [string]$Token ="SOMEPASSWORDHERRE",
+  [string]$SvvPath = $null,
   [ValidateSet('Console','Multimedia','Communications')]
   [string]$DefaultRole = 'Console',
   [switch]$AllRoles
 )
+
+$scriptDir = if ($PSScriptRoot -and ($PSScriptRoot -ne '')) {
+  $PSScriptRoot
+} else {
+  try { Split-Path -Parent $MyInvocation.MyCommand.Path } catch { $null }
+}
+
+# Allow override via env var or pre-set $SvvPath, otherwise auto-detect common candidates
+if (-not $SvvPath) { $SvvPath = $env:SVVPATH }
+
+if (-not $SvvPath) {
+  $candidates = @()
+  if ($scriptDir) {
+    $candidates += (Join-Path $scriptDir 'svcl-x64\svcl.exe')
+    $candidates += (Join-Path $scriptDir 'svcl.exe')
+    $candidates += (Join-Path $scriptDir 'SoundVolumeView64.exe')
+    $candidates += (Join-Path $scriptDir 'SoundVolumeView.exe')
+  }
+  # also check PATH if nothing found in script folder
+  $candidates += 'svcl.exe','SoundVolumeView64.exe','SoundVolumeView.exe'
+
+  $SvvPath = $candidates | Where-Object { 
+    try { Test-Path $_ } catch { $false } 
+  } | Select-Object -First 1
+}
+
+if ($SvvPath) {
+  # normalize to full path if possible
+  try { $SvvPath = (Resolve-Path $SvvPath -ErrorAction Stop).Path } catch {}
+} else {
+  throw "svcl.exe not found. Expected it in svcl-x64\svcl.exe, next to the script, or on PATH. You can also set the SVVPATH env var or pass -SvvPath explicitly."
+}
 
 $ErrorActionPreference = 'Stop'
 
@@ -499,28 +532,75 @@ function Set-DeviceVolumePercent {
 function List-PlaybackDevices {
   $raw = Get-DevicesRaw
   if (-not $raw.ok) {
-    return @{ ok=$false; rows=@(); total=0; exitCode=$raw.exitCode; stderr="no table" }
+    return @{ ok=$false; rows=@(); total=0; exitCode=$raw.exitCode; stderr=($raw.stderr) }
   }
-  $rows1 = $raw.rows | Where-Object {
-    ($_.'Direction' -eq 'Render') -and
-    ($_.PSObject.Properties.Name -contains 'Command-Line Friendly ID') -and
-    ($_.('Command-Line Friendly ID') -match '\\Device\\')
-  }
-  $rows = if ($rows1 -and $rows1.Count -gt 0) { $rows1 } else {
-    $raw.rows | Where-Object { $_.'Direction' -eq 'Render' }
-  }
-  $pick = @($rows | ForEach-Object {
-    [pscustomobject]@{
-      Name                        = $_.Name
-      'Device Name'               = $_.'Device Name'
-      Direction                   = $_.Direction
-      Default                     = $_.Default
-      'Default Multimedia'        = $_.'Default Multimedia'
-      'Default Communications'    = $_.'Default Communications'
-      'Volume Percent'            = $_.'Volume Percent'
-      'Command-Line Friendly ID'  = $_.'Command-Line Friendly ID'
+
+  $pick = @()
+
+  foreach ($r in $raw.rows) {
+    # direction: prefer 'Direction' but accept alternate names like 'Type'
+    $dir = Get-Col $r 'Direction'
+    if (-not $dir) { $dir = Get-Col $r 'Type' }
+    if (-not $dir) { $dir = '' }
+
+    # only interested in render (playback) devices
+    if ($dir -ne 'Render') { continue }
+
+    # Find a Command-Line Friendly ID (CLFI) robustly:
+    # 1) prefer column whose name matches 'command' & 'friendly'
+    # 2) else pick first column value that contains "\Device\"
+    $clfi = $null
+    foreach ($p in $r.PSObject.Properties.Name) {
+      if ($p -match '(?i)command.*friendly|command[-\s]*line.*friendly') {
+        $clfi = Get-Col $r $p
+        break
+      }
+    if (-not $clfi) {
+      foreach ($p in $r.PSObject.Properties.Name) {
+        $val = Get-Col $r $p
+        if ($val -and ($val -match '\\Device\\')) { $clfi = $val; break }
+      }
     }
-  })
+
+    # Volume: try 'Volume Percent' then fall back to 'Volume'
+    $vol = Get-Col $r 'Volume Percent'
+    if (-not $vol) { $vol = Get-Col $r 'Volume' }
+
+    $obj = [pscustomobject]@{
+      Name                       = (Get-Col $r 'Name')
+      'Device Name'              = (Get-Col $r 'Device Name')
+      Direction                  = $dir
+      Default                    = (Get-Col $r 'Default')
+      'Default Multimedia'       = (Get-Col $r 'Default Multimedia')
+      'Default Communications'   = (Get-Col $r 'Default Communications')
+      'Volume Percent'           = $vol
+      'Command-Line Friendly ID' = $clfi
+    }
+
+    $pick += $obj
+  }
+
+  # Fallback: if no items found, try looser detection and include raw row for inspection
+  if ($pick.Count -eq 0) {
+    $fallback = @()
+    foreach ($r in $raw.rows) {
+      $dir = Get-Col $r 'Direction'; if (-not $dir) { $dir = Get-Col $r 'Type' }
+      if ($dir -ne 'Render') { continue }
+      $anyClfi = $null
+      foreach ($p in $r.PSObject.Properties.Name) {
+        $val = Get-Col $r $p
+        if ($val -and ($val -match '\\Device\\')) { $anyClfi = $val; break }
+      }
+      $fallback += [pscustomobject]@{
+        Name = Get-Col $r 'Name'
+        'Device Name' = Get-Col $r 'Device Name'
+        Direction = $dir
+        'Command-Line Friendly ID' = $anyClfi
+        Raw = $r
+    }
+    if ($fallback.Count -gt 0) { $pick = $fallback }
+  }
+
   return @{ ok = $true; rows = $pick; total = $pick.Count; exitCode = $raw.exitCode }
 }
 
