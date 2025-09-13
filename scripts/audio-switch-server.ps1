@@ -882,17 +882,63 @@ function Open-UrlInEdge {
 }
 
 function Open-AppleTVApp {
-  param([string]$FallbackUrl = 'https://tv.apple.com/')
+  param(
+    [string]$PackageFamilyName = 'AppleInc.AppleTVWin_nzyj5cx40ttqa',
+    [string]$FallbackUrl = 'https://tv.apple.com/',
+    [int]$TimeoutSec = 10
+  )
+
+  # focus helper (tries AppActivate by PID or title)
+  function Try-Focus {
+    param($proc)
+    try {
+      $shell = New-Object -ComObject WScript.Shell
+      return $shell.AppActivate($proc.Id)
+    } catch {
+      try { $shell.AppActivate($proc.MainWindowTitle) } catch { $false }
+    }
+  }
+
   try {
-    $appMoniker = 'shell:AppsFolder\AppleInc.AppleTV_8wekyb3d8bbwe!App'
-    Start-Process explorer.exe $appMoniker -ErrorAction Stop | Out-Null
-    Start-Sleep -Milliseconds 500
-    $p = Get-Process -Name "AppleTV" -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($p) { [void](Focus-ProcessWindow -Process $p) }
+    if (-not $PackageFamilyName) { throw "No package family name provided." }
+
+    $appMoniker = "shell:AppsFolder\$PackageFamilyName!App"
+
+    # Launch via explorer with -ArgumentList (safer than positional)
+    Start-Process -FilePath 'explorer.exe' -ArgumentList $appMoniker -ErrorAction Stop | Out-Null
+
+    # Wait for the app/process/window to appear
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
+      Start-Sleep -Milliseconds 400
+
+      # Heuristics for candidate:
+      $candidate = Get-Process -ErrorAction SilentlyContinue |
+        Where-Object {
+          ($_.ProcessName -match 'AppleTV|AppleTVWin') -or
+          ($_.ProcessName -eq 'ApplicationFrameHost' -and $_.MainWindowTitle -and ($_.MainWindowTitle -match 'Apple' -or $_.MainWindowTitle -match 'Apple\s*TV')) -or
+          ($_.MainWindowTitle -and ($_.MainWindowTitle -match 'Apple' -or $_.MainWindowTitle -match 'Apple\s*TV'))
+        } |
+        Select-Object -First 1
+
+      if ($candidate) {
+        Try-Focus -proc $candidate | Out-Null
+        return $true
+      }
+  }
+
+    throw "Timed out waiting for Apple TV window/process after $TimeoutSec seconds."
   } catch {
-    try { Open-UrlInEdge -Url $FallbackUrl } catch { Start-Process $FallbackUrl | Out-Null }
+      # fallback: open the web fallback URL (Edge if available)
+    try {
+      Start-Process "microsoft-edge:$FallbackUrl" -ErrorAction SilentlyContinue | Out-Null
+    } catch {
+      try { Start-Process $FallbackUrl | Out-Null } catch {}
+    }
+    return $false
   }
 }
+
 
 function Open-StreamingService {
   param([string]$Service)
