@@ -1,9 +1,10 @@
-<#!
+<#! 
  Audio Switch & Utility Server (PowerShell 5.1 compatible)
  ---------------------------------------------------------
  - Switch Windows default playback device (by key, name, or Command-Line Friendly ID)
  - Set device/system volume to a percent, query current volume
  - Launch streaming services with the right app/browser and focus the window
+ - Fan Control integration: switch fixed/curve profiles or refresh sensors
  - Lightweight HTTP server, works great with iOS Shortcuts/Siri
 
  Endpoints (GET):
@@ -12,9 +13,14 @@
    /volume/current?token=...
    /device/current?token=...
    /openStreaming?service=youtube|crunchyroll|netflix|disney|prime|appletv&token=...
+   /fan?percent=0..100&token=...
+   /fan/profile?name=<config-basename>&token=...
+   /fan/refresh?token=...
+   /fan/configs?nearestTo=55&token=...
    /list?token=...&ids=1
 
- Requires NirSoft SoundVolumeCommandLine (Can use SoundVolumeView (x64), however SoundVolumeCommandLine works better) in the path specified by -SvvPath.
+ Requires NirSoft SoundVolumeCommandLine (svcl.exe) or SoundVolumeView in the path specified by -SvvPath.
+ Fan speed requires FanControl.exe and pre-saved configuration files in -FanConfigDir.
  Tested on Windows PowerShell 5.1.
 #>
 
@@ -22,6 +28,11 @@ param(
   [int]$Port = 8008,
   [string]$Token ="SOMEPASSWORDHERRE",
   [string]$SvvPath = $null,
+
+  # --- Fan Control paths ---
+  [string]$FanControlExe = "C:\Users\aapae\Desktop\FanControl\FanControl.exe",
+  [string]$FanConfigDir  = "C:\Users\aapae\Desktop\FanControl\Configurations",
+
   [ValidateSet('Console','Multimedia','Communications')]
   [string]$DefaultRole = 'Console',
   [switch]$AllRoles
@@ -78,6 +89,32 @@ $DeviceMap = @{
 }
 
 $RoleToNum = @{ "Console"=0; "Multimedia"=1; "Communications"=2 }
+
+function Start-AppSafe {
+  param(
+    [Parameter(Mandatory)][string]$File,
+    [string[]]$Args,
+    [string]$WorkingDirectory = $null,
+    [ValidateSet('Normal','Minimized','Maximized','Hidden')]
+    [string]$WindowStyle = 'Normal'
+  )
+  if (-not (Test-Path $File)) { throw "File not found: $File" }
+  $wd = if ($WorkingDirectory) { $WorkingDirectory } else { Split-Path $File -Parent }
+
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName         = $File
+  $psi.Arguments        = ($Args -join ' ')
+  $psi.WorkingDirectory = $wd
+  $psi.UseShellExecute  = $true
+  switch ($WindowStyle) {
+    'Minimized' { $psi.WindowStyle = [Diagnostics.ProcessWindowStyle]::Minimized }
+    'Maximized' { $psi.WindowStyle = [Diagnostics.ProcessWindowStyle]::Maximized }
+    'Hidden'    { $psi.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden }
+    default     { $psi.WindowStyle = [Diagnostics.ProcessWindowStyle]::Normal }
+  }
+  [System.Diagnostics.Process]::Start($psi)
+}
+
 
 function Send-Json {
   param($ctx, [int]$status, $obj)
@@ -236,6 +273,166 @@ function Get-DevicesRaw {
   return @{ ok=$false; rows=@(); exitCode=-1; stderr="Unsupported tool for stdout mode"; headers=@() }
 }
 
+# -------------------- Fan Control helpers --------------------
+function Get-FCProcess {
+  Get-Process -Name FanControl -ErrorAction SilentlyContinue | Select-Object -First 1
+}
+
+function Test-IsCurrentProcessElevated {
+  $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $p  = New-Object Security.Principal.WindowsPrincipal($id)
+  $p.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
+}
+
+function Start-Unelevated {
+  param(
+    [Parameter(Mandatory)][string]$File,
+    [string[]]$Args,
+    [string]$WorkingDirectory = $null
+  )
+  if (-not (Test-Path $File)) { throw "File not found: $File" }
+  $wd = if ($WorkingDirectory) { $WorkingDirectory } else { Split-Path $File -Parent }
+  $argStr = ($Args -join ' ')
+  $shell = New-Object -ComObject Shell.Application
+  $shell.ShellExecute($File, $argStr, $wd, 'open', 0) | Out-Null
+}
+
+# Kill any running FanControl and start fresh with target config
+function Restart-FCWithConfig {
+  param([Parameter(Mandatory)][string]$ConfigPath)
+  if (-not (Test-Path $FanControlExe)) { throw "FanControl.exe not found: $FanControlExe" }
+  if (-not (Test-Path $ConfigPath))    { throw "Config not found: $ConfigPath" }
+
+  # Stop all running instances
+  $procs = @(Get-Process -Name FanControl -ErrorAction SilentlyContinue)
+  foreach ($p in $procs) {
+    try { $null=$p.CloseMainWindow(); Start-Sleep -Milliseconds 200 } catch {}
+    try { if (-not $p.HasExited) { $p.Kill() } } catch {}
+    try { $null=$p.WaitForExit(2000) } catch {}
+  }
+  if (Get-Process -Name FanControl -ErrorAction SilentlyContinue) {
+    & "$env:SystemRoot\System32\taskkill.exe" /F /IM FanControl.exe /T | Out-Null
+    Start-Sleep -Milliseconds 200
+  }
+
+  # Start minimized with target config; if server is elevated, launch UNELEVATED for desktop context
+  $args = @('-m','-c', $ConfigPath)
+  $wd   = Split-Path $FanControlExe -Parent
+  if (Test-IsCurrentProcessElevated) {
+    Start-Unelevated -File $FanControlExe -Args $args -WorkingDirectory $wd
+  } else {
+    Start-AppSafe   -File $FanControlExe -Args $args -WorkingDirectory $wd -WindowStyle Minimized
+  }
+
+  Start-Sleep -Milliseconds 500
+}
+
+
+function Get-FCRunPath {
+  $p = Get-FCProcess
+  if ($p) {
+    try { return $p.MainModule.FileName } catch { } # might fail under 32→64 boundary; ignore
+  }
+  return $FanControlExe
+}
+
+function Ensure-FanControlRunning {
+  if (-not (Test-Path $FanControlExe)) { throw "FanControl.exe not found: $FanControlExe" }
+  $proc = Get-FCProcess
+  if ($proc) { return $proc }  # already running; do NOT minimize/steal focus
+  # not running → start minimized once
+  Start-AppSafe -File $FanControlExe -Args @('-m') -WindowStyle Minimized | Out-Null
+  Start-Sleep -Milliseconds 500
+  return (Get-FCProcess)
+}
+
+function Invoke-FC {
+  param([string[]]$Args)
+  # If it’s running, use the running binary path so single-instance handler picks up args.
+  $exeToUse = Get-FCRunPath
+  if (-not (Get-FCProcess)) { Ensure-FanControlRunning | Out-Null }  # start only if needed
+  Start-AppSafe -File $exeToUse -Args $Args -WindowStyle Hidden | Out-Null
+}
+
+function Switch-FCConfig {
+  param([Parameter(Mandatory)][string]$ConfigPath)
+  if (-not (Test-Path $ConfigPath)) { throw "Config not found: $ConfigPath" }
+  Invoke-FC -Args @('-c', $ConfigPath)
+}
+
+function Get-FCConfigs {
+  if (-not (Test-Path $FanConfigDir)) { throw "Config directory not found: $FanConfigDir" }
+  Get-ChildItem -Path $FanConfigDir -Filter *.json -File
+}
+
+function Get-FCConfigSummary {
+  # Requires Get-FCConfigs and $FanConfigDir to be defined
+  try {
+    $files = Get-FCConfigs
+  } catch {
+    throw "Get-FCConfigs failed: $($_.Exception.Message)"
+  }
+
+  $list = @()
+  foreach ($f in $files) {
+    $bn = $f.BaseName
+    $pct = $null
+    $hasPct = $false
+    if ($bn -match '(\d{1,3})') {
+      $n = [int]$Matches[1]
+      if ($n -ge 0 -and $n -le 100) { $pct = $n; $hasPct = $true }
+    }
+    $list += [pscustomobject]@{
+      basename      = $bn
+      filename      = $f.Name
+      fullPath      = $f.FullName
+      percent       = $pct
+      hasPercent    = $hasPct
+      length        = $f.Length
+      lastWriteTime = $f.LastWriteTime
+    }
+  }
+
+  $withPct = $list | Where-Object { $_.hasPercent } | Sort-Object percent
+  [pscustomobject]@{
+    total       = $list.Count
+    withPercent = @($withPct)
+    all         = @($list)
+  }
+}
+
+
+function Set-FCPercent {
+  param([Parameter(Mandatory)][ValidateRange(0,100)][int]$Percent)
+  $configs = Get-FCConfigs
+  if (-not $configs) { throw "No .json configs found in $FanConfigDir" }
+
+  $exact = $configs | Where-Object { $_.BaseName -match '(\d{1,3})' -and [int]$Matches[1] -eq $Percent } | Select-Object -First 1
+  if ($exact) { Switch-FCConfig -ConfigPath $exact.FullName; return [pscustomobject]@{ requested=$Percent; applied=$Percent; config=$exact.FullName } }
+
+  $withPct = foreach ($c in $configs) {
+    if ($c.BaseName -match '(\d{1,3})') { [pscustomobject]@{ File=$c; Pct=[int]$Matches[1] } }
+  }
+  if (-not $withPct) { throw "Could not parse percentages from config filenames in $FanConfigDir" }
+
+  $nearest = $withPct | Sort-Object { [math]::Abs($_.Pct - $Percent) } | Select-Object -First 1
+  Switch-FCConfig -ConfigPath $nearest.File.FullName
+  [pscustomobject]@{ requested=$Percent; applied=$nearest.Pct; config=$nearest.File.FullName }
+}
+
+function Set-FCProfile {
+  param([Parameter(Mandatory)][string]$Name)
+  $cfg = Get-FCConfigs | Where-Object { $_.BaseName -ieq $Name } | Select-Object -First 1
+  if (-not $cfg) { throw "Profile not found (basename must match): $Name" }
+  Switch-FCConfig -ConfigPath $cfg.FullName
+  [pscustomobject]@{ profile=$Name; config=$cfg.FullName }
+}
+
+function Refresh-FC {
+  Invoke-FC -Args @('-r')
+  "refreshed"
+}
+
 # -------------------- Direct default device/volume (svcl) --------------------
 function _ResolveTool() {
   $exe = $SvvPath
@@ -264,7 +461,6 @@ function Get-DefaultRenderId-Direct {
   $null
 }
 
-
 function Get-DefaultRenderVolume-Direct {
   $r = _ResolveTool
   if (-not $r.isSvcl -or -not (Test-Path $r.exe)) { return $null }
@@ -280,7 +476,6 @@ function Get-DefaultRenderVolume-Direct {
   $d = [math]::Max(0, [math]::Min(100, $d))
   return [int][math]::Round($d)
 }
-
 
 function Get-DefaultRenderRowFromRaw {
   param($raw)
@@ -403,8 +598,8 @@ function Get-AudioSnapshot {
   if (-not $row) {
     $parts = $id -split '\\'
     if ($parts.Length -ge 4) {
-      $deviceName = $parts[0]   # provider, e.g. "NVIDIA High Definition Audio"
-      $name       = $parts[2]   # device name, e.g. "M32UC"
+      $deviceName = $parts[0]   # provider
+      $name       = $parts[2]   # device name
     }
   } else {
     $deviceName = $row.'Device Name'
@@ -432,7 +627,6 @@ function Get-AudioSnapshot {
   }
 }
 
-
 function Get-Diagnostics {
   $raw = Get-DevicesRaw
   $env = @{
@@ -456,27 +650,19 @@ function Get-Diagnostics {
 function Clean-CLFI {
   param([string]$text)
   if (-not $text) { return $null }
-
-  # Strip "1 item found:" / "N items found:" prefixes if present
   $t = $text.Trim()
   $t = ($t -replace '^(?i)\s*\d+\s+items?\s+found:\s*', '')
-
-  # Try to extract the first real CLFI: "<Provider>\Device\<Name>\Render"
   $m = [regex]::Match($t, '(?im)([^\\\r\n]+)\\Device\\([^\\\r\n]+)\\Render')
   if ($m.Success) {
     return "$($m.Groups[1].Value)\Device\$($m.Groups[2].Value)\Render"
   }
-
-  # Fallback: if it already contains a CLFI, split on whitespace and pick the first token that looks like one
   if ($t -match '\\Device\\' -and $t -match '\\Render') {
     foreach ($tok in ($t -split '\s{2,}|\s+')) {
       if ($tok -match '\\Device\\' -and $tok -match '\\Render') { return $tok.Trim() }
     }
   }
-
   return $t
 }
-
 
 # --- Legacy helpers (used by /switch, /volume set, etc.) ---
 function Get-DefaultRenderRow { Get-DefaultRenderRowFromRaw (Get-DevicesRaw) }
@@ -546,9 +732,6 @@ function List-PlaybackDevices {
     # only interested in render (playback) devices
     if ($dir -ne 'Render') { continue }
 
-    # Find a Command-Line Friendly ID (CLFI) robustly:
-    # 1) prefer column whose name matches 'command' & 'friendly'
-    # 2) else pick first column value that contains "\Device\"
     $clfi = $null
     foreach ($p in $r.PSObject.Properties.Name) {
       if ($p -match '(?i)command.*friendly|command[-\s]*line.*friendly') {
@@ -606,7 +789,6 @@ function List-PlaybackDevices {
   return @{ ok = $true; rows = $pick; total = $pick.Count; exitCode = $raw.exitCode }
 }
 
-
 function Get-ActiveKeyFromMap {
   $id = Get-DefaultRenderId-Direct
   if (-not $id) { $id = Get-DefaultRenderId }  # fallback
@@ -648,7 +830,7 @@ function Get-CurrentVolumes {
   @{ ok=$true; deviceVolume=$iv; systemVolume=$iv }
 }
 
-# ---- Window focusing helpers (unchanged) ----
+# ---- Window focusing helpers ----
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
@@ -766,8 +948,8 @@ while ($listener.IsListening) {
     if ($path -eq "/volume") {
       $percentStr = $qs["percent"]
       if (-not $percentStr) { Send-Json $ctx 400 @{ error="Missing percent" }; continue }
-      $p = [int]$percentStr
-      if ($p -lt 0 -or $p -gt 100) { Send-Json $ctx 400 @{ error="Percent must be 0..100" }; continue }
+      $pOk = [int]::TryParse($percentStr, [ref]([int]$p=0))
+      if (-not $pOk -or $p -lt 0 -or $p -gt 100) { Send-Json $ctx 400 @{ error="Percent must be 0..100" }; continue }
       Set-DeviceVolumePercent -Percent $p
       Send-Json $ctx 200 @{ ok=$true; percent=$p }
       continue
@@ -842,6 +1024,101 @@ while ($listener.IsListening) {
       continue
     }
 
+   # ---------------- Fan Control endpoints ----------------
+    if ($path -eq "/fan/apply") {
+      $name   = ([string]$qs["name"]).Trim()
+      $pctStr = ([string]$qs["percent"]).Trim()
+
+      try {
+        if ($name) {
+          if (Get-Command Set-FCProfileSmart -ErrorAction SilentlyContinue) {
+            $r = Set-FCProfileSmart -Name $name
+            Restart-FCWithConfig -ConfigPath $r.config
+            Send-Json $ctx 200 @{ ok=$true; mode="name"; profile=$r.profile; config=$r.config; match=$r.match; restarted=$true }
+          } else {
+            $r = Set-FCProfile -Name $name
+            Restart-FCWithConfig -ConfigPath $r.config
+            Send-Json $ctx 200 @{ ok=$true; mode="name"; profile=$r.profile; config=$r.config; restarted=$true }
+          }
+          continue
+        }
+
+        if ($pctStr) {
+          $pct = 0
+          if (-not [int]::TryParse($pctStr, [ref]$pct)) { Send-Json $ctx 400 @{ error="percent must be 0..100" }; continue }
+          if ($pct -lt 0 -or $pct -gt 100)            { Send-Json $ctx 400 @{ error="percent must be 0..100" }; continue }
+          $r = Set-FCPercent -Percent $pct
+          Restart-FCWithConfig -ConfigPath $r.config
+          Send-Json $ctx 200 @{ ok=$true; mode="percent"; requested=$r.requested; applied=$r.applied; config=$r.config; restarted=$true }
+          continue
+        }
+
+        Send-Json $ctx 400 @{ error="Provide name=profileBasename or percent=0..100" }
+      } catch {
+        Send-Json $ctx 500 @{ error="$($_.Exception.Message)" }
+      }
+      continue
+    }
+
+
+    if ($path -eq "/fan/refresh") {
+      try {
+        $status = Refresh-FC
+        Send-Json $ctx 200 @{ ok=$true; status=$status }
+      } catch {
+        Send-Json $ctx 500 @{ error = "$($_.Exception.Message)" }
+      }
+      continue
+    }
+
+    if ($path -eq "/fan/configs") {
+      try {
+        $summary = Get-FCConfigSummary
+
+        $nearest = $null
+        $nearestToStr = ([string]$qs["nearestTo"]).Trim()
+        if ($nearestToStr) {
+          $want = 0
+          if ([int]::TryParse($nearestToStr, [ref]$want)) {
+            $cands = $summary.withPercent
+            if ($cands -and $cands.Count -gt 0) {
+              $nearest = ($cands | Sort-Object { [math]::Abs($_.percent - $want) } | Select-Object -First 1)
+            }
+          }
+        }
+
+        Send-Json $ctx 200 @{ ok=$true; summary=$summary; nearest=$nearest }
+      } catch {
+        Send-Json $ctx 500 @{ error = "$($_.Exception.Message)" }
+      }
+      continue
+    }
+
+
+    if ($path -eq "/fan/status") {
+      try {
+        $p = Get-FCProcess
+        $exeInUse = Get-FCRunPath
+        $configs  = @()
+        try { $configs = (Get-FCConfigs | Select-Object -ExpandProperty BaseName) } catch { $configs = @() }
+        Send-Json $ctx 200 @{
+          ok       = $true
+          running  = [bool]$p
+          pid      = if ($p) { $p.Id } else { $null }
+          exe      = $exeInUse
+          started  = if ($p) { $p.StartTime } else { $null }
+          configDir= $FanConfigDir
+          profiles = $configs
+        }
+      } catch {
+        Send-Json $ctx 500 @{ error = "$($_.Exception.Message)" }
+      }
+      continue
+    }
+
+
+    # -------------------------------------------------------
+
     if ($path -eq "/list") {
       $result = List-PlaybackDevices
       if ($result.ok) {
@@ -877,7 +1154,14 @@ while ($listener.IsListening) {
       continue
     }
 
-    Send-Json $ctx 404 @{ error="Not found"; endpoints=@("/switch","/volume","/volume/current","/device/current","/openStreaming","/list","/status","/diag") }
+    Send-Json $ctx 404 @{ 
+      error="Not found"; 
+      endpoints=@(
+        "/switch","/volume","/volume/current","/device/current","/openStreaming",
+        "/fan","/fan/profile","/fan/apply","/fan/refresh","/fan/configs","/fan/status",
+        "/list","/status","/diag"
+      ) 
+    }
 
   } catch {
     if ($ctx) {
