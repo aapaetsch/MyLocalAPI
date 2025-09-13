@@ -19,8 +19,8 @@
 #>
 
 param(
-  # [int]$Port = 8008,
-  # [string]$Token ="SOMEPASSWORDHERRE",
+  [int]$Port = 8008,
+  [string]$Token ="SOMEPASSWORDHERRE",
   [string]$SvvPath = $null,
   [ValidateSet('Console','Multimedia','Communications')]
   [string]$DefaultRole = 'Console',
@@ -605,6 +605,7 @@ function List-PlaybackDevices {
 
   return @{ ok = $true; rows = $pick; total = $pick.Count; exitCode = $raw.exitCode }
 }
+
 
 function Get-ActiveKeyFromMap {
   $id = Get-DefaultRenderId-Direct
