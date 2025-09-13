@@ -19,8 +19,8 @@
 #>
 
 param(
-  # [int]$Port = 8008,
-  # [string]$Token ="SOMEPASSWORDHERRE",
+  [int]$Port = 8008,
+  [string]$Token ="SOMEPASSWORDHERRE",
   [ValidateSet('Console','Multimedia','Communications')]
   [string]$DefaultRole = 'Console',
   [switch]$AllRoles
