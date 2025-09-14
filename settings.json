@@ -1,0 +1,38 @@
+{
+  "port": 1482,
+  "host": "127.0.0.1",
+  "token": "your_secure_token_here",
+  "audio": {
+    "enabled": true,
+    "svv_path": "",
+    "mappings": [
+      {
+        "label": "headphones",
+        "device_id": "HyperX Cloud II Wireless\\Device\\Speakers\\Render",
+        "use_for_streaming": true
+      },
+      {
+        "label": "speakers",
+        "device_id": "Bose Revolve+ SoundLink\\Device\\Speakers\\Render", 
+        "use_for_streaming": false
+      },
+      {
+        "label": "screen",
+        "device_id": "NVIDIA High Definition Audio\\Device\\M32UC\\Render",
+        "use_for_streaming": false
+      }
+    ]
+  },
+  "fan": {
+    "enabled": false,
+    "fan_exe_path": "C:\\Tools\\FanControl\\FanControl.exe",
+    "fan_config_path": "C:\\Tools\\FanControl\\Configurations",
+    "apply_on_stream_launch": false,
+    "selected_config": "stream_profile_75"
+  },
+  "streaming": {
+    "launch_streaming_by_endpoint": true,
+    "appleTVMoniker": "AppleInc.AppleTVWin_nzyj5cx40ttqa"
+  },
+  "autostart": false
+}

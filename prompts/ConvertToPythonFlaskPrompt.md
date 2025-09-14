@@ -77,6 +77,7 @@ Streaming / OpenStreaming setting:
   - When OFF, /openStreaming should be treated as disabled: any request to it should return a clear error (HTTP 403 or 404 with JSON explaining it is disabled).
   - When ON (default), /openStreaming behaves as specified in Endpoints & behavior.
   - Persist this toggle in settings JSON and reflect its state in the Endpoints tab status icons.
+- An input for the apple tv app moniker, if possible we should find and populate this field for the user.
 
 Endpoints tab — contents:
 - Show a list of each available endpoint and its query parameters.
@@ -132,7 +133,8 @@ Use a JSON schema like:
     "selected_config": "stream_profile_1"
   },
   "streaming": {
-    "launch_streaming_by_endpoint": true
+    "launch_streaming_by_endpoint": true,
+    "appleTVMoniker": ""
   },
   "autostart": false
 }

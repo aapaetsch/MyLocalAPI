@@ -1,0 +1,31 @@
+# MyLocalAPI Python Dependencies
+
+# Core web framework
+Flask==2.3.3
+Flask-Cors==4.0.0
+Werkzeug==2.3.7
+
+# System tray integration
+pystray==0.19.4
+
+# Image processing for tray icon
+Pillow==10.0.1
+
+# HTTP client for testing endpoints
+requests==2.31.0
+
+# Process management and system utilities
+psutil==5.9.6
+
+# Windows-specific integrations (optional, install only on Windows)
+pywin32>=306; sys_platform == "win32"
+
+# Packaging and executable creation
+pyinstaller==6.1.0
+
+# Development and testing dependencies
+pytest==7.4.3
+pytest-cov==4.1.0
+
+# Additional utilities
+watchdog==3.0.0
