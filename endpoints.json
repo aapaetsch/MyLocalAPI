@@ -1,0 +1,110 @@
+[
+  {
+    "group": "Audio Control",
+    "enabled_setting": "audio.enabled",
+    "endpoints": [
+      {
+        "path": "/switch",
+        "method": "GET",
+        "params": "key=<label>&token=<token> OR id=<device_id>&token=<token>",
+        "description": "Switch default audio device",
+        "test_params": "key=headphones"
+      },
+      {
+        "path": "/volume",
+        "method": "GET",
+        "params": "percent=<0-100>&token=<token>",
+        "description": "Set system volume percentage",
+        "test_params": "percent=50"
+      },
+      {
+        "path": "/volume/current",
+        "method": "GET",
+        "params": "token=<token>",
+        "description": "Get current volume and device info",
+        "test_params": ""
+      },
+      {
+        "path": "/device/current",
+        "method": "GET",
+        "params": "token=<token>",
+        "description": "Get current default device info",
+        "test_params": ""
+      },
+      {
+        "path": "/list",
+        "method": "GET",
+        "params": "token=<token>",
+        "description": "List all playback devices",
+        "test_params": ""
+      }
+    ]
+  },
+  {
+    "group": "Streaming Services",
+    "enabled_setting": "streaming.launch_streaming_by_endpoint",
+    "endpoints": [
+      {
+        "path": "/openStreaming",
+        "method": "GET",
+        "params": "service=<youtube|crunchyroll|netflix|disney|prime|appletv>&token=<token>",
+        "description": "Launch streaming service and switch audio",
+        "test_params": "service=youtube"
+      }
+    ]
+  },
+  {
+    "group": "Fan Control",
+    "enabled_setting": "fan.enabled",
+    "endpoints": [
+      {
+        "path": "/fan/apply",
+        "method": "GET",
+        "params": "name=<config>&token=<token> OR percent=<0-100>&token=<token>",
+        "description": "Apply fan configuration or percentage",
+        "test_params": "percent=50"
+      },
+      {
+        "path": "/fan/refresh",
+        "method": "GET",
+        "params": "token=<token>",
+        "description": "Refresh fan sensors",
+        "test_params": ""
+      },
+      {
+        "path": "/fan/configs",
+        "method": "GET",
+        "params": "token=<token>&nearestTo=<percent>",
+        "description": "Get available fan configurations",
+        "test_params": "nearestTo=75"
+      },
+      {
+        "path": "/fan/status",
+        "method": "GET",
+        "params": "token=<token>",
+        "description": "Get fan control status",
+        "test_params": ""
+      }
+    ]
+  },
+  {
+    "group": "System",
+    "enabled_setting": null,
+    "endpoints": [
+      {
+        "path": "/status",
+        "method": "GET",
+        "params": "token=<token>",
+        "description": "Get overall system status",
+        "test_params": ""
+      },
+      {
+        "path": "/diag",
+        "method": "GET",
+        "params": "token=<token>",
+        "description": "Get diagnostic information",
+        "test_params": ""
+      }
+    ]
+  }
+]

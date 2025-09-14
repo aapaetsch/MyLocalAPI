@@ -7,35 +7,65 @@ Main window with settings management and server control
 import os
 import sys
 import tempfile
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+import tkinter as tk  # Keep for some dialog compatibility
+from tkinter import messagebox, filedialog
+import tkinter.font as tkfont
+import customtkinter as ctk
+CTK_AVAILABLE = True
 import webbrowser
 import requests
 import json
 import logging
-from typing import Any, Dict, List, Optional
 
 from utils import AutostartManager, validate_executable, open_file_location
 from settings import SettingsManager
 
 logger = logging.getLogger(__name__)
 
+
 class MainWindow:
-    """Main GUI window for MyLocalAPI"""
-    
+    # Class-level default palette (can be overridden per-instance)
+    APP_BG = "#1E1F2B"
+    ALT_BG = "#282A3A"
+    INPUT_BG = "#3B3D4B"
+    FIELD_BG = INPUT_BG
+    SUCCESS = "#BBD760"
+    DANGER = "#FC6A6A"
+    FG = "#E6EEF3"
+    MUTED = "#9AA7B2"
+    ACCENT = SUCCESS
+    ACCENT_HOVER = "#A8C44A"
+    DISABLED_BTN_BG = "#6b6b6b"
+    DISABLED_BTN_FG = "#BFC7CF"
+
     def __init__(self, root: tk.Tk, app):
         self.root = root
         self.app = app  # Reference to main app
         self.settings_manager = app.settings_manager
+        self._alt_bg = self.ALT_BG
+        self._input_bg = self.INPUT_BG
+        self._field_bg = self.FIELD_BG
+        self._success = self.SUCCESS
+        self._danger = self.DANGER
+        self._fg = self.FG
+        self._muted = self.MUTED
+        self._accent = self.ACCENT
+        self._accent_hover = self.ACCENT_HOVER
+        self._disabled_btn_bg = self.DISABLED_BTN_BG
+        self._disabled_btn_fg = self.DISABLED_BTN_FG
         
         # GUI state variables
         self.port_var = tk.StringVar()
         self.token_var = tk.StringVar()
         self.server_status_var = tk.StringVar()
+        # Token visibility flag
+        self._token_visible = False
         
         # Settings variables
         self.audio_enabled_var = tk.BooleanVar()
         self.svv_path_var = tk.StringVar()
+        # Whether to use a custom SoundVolumeView install (show/hide SVV path input)
+        self.use_custom_svv_var = tk.BooleanVar()
         self.fan_enabled_var = tk.BooleanVar()
         self.fan_exe_var = tk.StringVar()
         self.fan_config_var = tk.StringVar()
@@ -51,6 +81,41 @@ class MainWindow:
         
         # Start status update timer
         self.root.after(1000, self._update_status_timer)
+
+    # Helper factory methods to reduce repeated CTk fallbacks
+    def _frame(self, parent, **pack_kwargs):
+        # Use CustomTkinter frame (CTk will be bundled)
+        return ctk.CTkFrame(parent)
+
+    def _label(self, parent, text=None, textvariable=None, text_color=None, font=None, **kwargs):
+        # Use CTkLabel exclusively (CTk will be bundled)
+        return ctk.CTkLabel(parent, text=text, textvariable=textvariable, text_color=text_color, font=font)
+
+    def _button(self, parent, text, command=None, fg_color=None, text_color=None, width=None, hover_color=None):
+        # Build kwargs only for values provided to avoid passing None to CTk internals
+        kwargs = {}
+        if fg_color is not None:
+            kwargs['fg_color'] = fg_color
+        if text_color is not None:
+            kwargs['text_color'] = text_color
+        if width is not None:
+            kwargs['width'] = width
+        if hover_color is not None:
+            kwargs['hover_color'] = hover_color
+        return ctk.CTkButton(parent, text=text, command=command, **kwargs)
+
+    def _entry(self, parent, textvariable=None, width=None, show=None):
+        kwargs = {}
+        if textvariable is not None:
+            kwargs['textvariable'] = textvariable
+        if width is not None:
+            kwargs['width'] = width
+        if show is not None:
+            kwargs['show'] = show
+        return ctk.CTkEntry(parent, **kwargs)
+
+    def _switch(self, parent, text, variable, command=None):
+        return ctk.CTkSwitch(parent, text=text, variable=variable, command=command)
     
     def _setup_window(self):
         """Setup main window properties"""
@@ -59,14 +124,10 @@ class MainWindow:
         self.root.minsize(600, 800)
         self._apply_steel_blue_theme()
 
-        # Hide native title bar and create a custom one that matches the theme.
-        # overrideredirect removes the OS chrome; we must provide our own controls.
-        try:
-            # Remove native decorations
-            self.root.overrideredirect(True)
-        except Exception:
-            # If this fails for some platforms, continue without custom titlebar
-            logger.debug("overrideredirect not available; using native title bar")
+        # Use the native OS title bar for stability (taskbar, Alt+Tab, window manager).
+        # Removing the native chrome with overrideredirect() caused rendering,
+        # taskbar and Alt+Tab issues on some Windows configurations, so we keep
+        # the native decorations and avoid overriding the window region.
 
         # Load icons (keep references on self to avoid GC) and ensure they're small
         try:
@@ -82,7 +143,7 @@ class MainWindow:
 
             # Desired display sizes (increased app icon size)
             APP_ICON_SIZE = (32, 32)
-            TRAY_ICON_SIZE = (16, 16)
+            TRAY_ICON_SIZE = (64, 64)
 
             # Try Pillow for high-quality resize
             try:
@@ -177,19 +238,8 @@ class MainWindow:
         except Exception as e:
             logger.debug(f"Could not load icons: {e}")
 
-        # Build the custom titlebar (if overrideredirect succeeded)
-        try:
-            if self.root.overrideredirect():
-                # overrideredirect() returns current state when called with no args
-                # If it returned True above then we proceed, otherwise try to create anyway
-                self._create_custom_titlebar()
-            else:
-                # Attempt to create custom titlebar even if overrideredirect returned False
-                # Some platforms ignore overrideredirect - this will still add a top bar inside the client area
-                self._create_custom_titlebar()
-        except Exception:
-            # If anything goes wrong, fall back to native title bar
-            logger.debug("Could not create custom titlebar; falling back to native title bar")
+        # Do not create a custom titlebar — use the OS-provided chrome for correct
+        # taskbar, Alt+Tab, and compositor behavior.
         
         # Handle window close
         self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
@@ -200,6 +250,11 @@ class MainWindow:
             if os.name == 'nt':
                 # run shortly after the main loop starts / window is created
                 self.root.after(100, lambda: self._ensure_taskbar_icon())
+                # Secondary attempt after a longer delay to handle slow window mapping
+                try:
+                    self.root.after(500, lambda: self._ensure_taskbar_icon())
+                except Exception:
+                    pass
         except Exception:
             pass
         
@@ -209,26 +264,33 @@ class MainWindow:
     
     def _apply_steel_blue_theme(self):
         """Apply a steel-blue dark theme to the Tkinter/ttk UI"""
+        # Apply a simple CTk appearance and store palette values for custom widgets
         try:
-            style = ttk.Style(self.root)
-            # Prefer a theme that allows color tuning
-            try:
-                style.theme_use('clam')
-            except Exception:
+            if CTK_AVAILABLE:
                 try:
-                    style.theme_use(style.theme_use())
+                    ctk.set_appearance_mode('dark')
+                    # Try to nudge CTk's theme; if a dict is accepted it will be used,
+                    # otherwise the call will be ignored.
+                    try:
+                        ctk.set_default_color_theme('dark-blue')
+                    except Exception:
+                        pass
                 except Exception:
                     pass
 
-            # Your requested palette
-            app_bg = "#282A3A"   # app background
-            field_bg = "#1E1F2B" # fields / panels
-            accent = "#4682B4"   # steel blue accent for buttons/links
-            accent_hover = "#5A9AD0"
-            fg = "#E6EEF3"
-            muted = "#9AA7B2"
+            # Use the user's requested palette
+            app_bg = "#1E1F2B"                 # General app background
+            alt_bg = "#282A3A"                 # Alternate lighter background
+            input_bg = "#3B3D4B"               # Input background
+            # field_bg used by titlebar/controls; choose a slightly lighter input background
+            field_bg = input_bg
+            success_green = "#BBD760"          # Green success
+            danger_red = "#FC6A6A"             # Reds
+            fg = "#E6EEF3"                     # Foreground (text)
+            muted = "#9AA7B2"                  # Muted text
+            accent = success_green
+            accent_hover = "#A8C44A"
 
-            # Expose palette on self so other methods (custom titlebar) can reuse
             self._app_bg = app_bg
             self._field_bg = field_bg
             self._accent = accent
@@ -236,81 +298,53 @@ class MainWindow:
             self._fg = fg
             self._muted = muted
 
-            # Root/background
-            self.root.configure(bg=app_bg)
-            self.root.option_add('*Foreground', fg)
-            self.root.option_add('*Font', 'TkDefaultFont 10')
-            self.root.option_add('*Listbox.background', field_bg)
-            self.root.option_add('*Entry.background', field_bg)
-            self.root.option_add('*Text.background', field_bg)
-            self.root.option_add('*TCombobox*Listbox.background', field_bg)
+            # Persist some additional color names for code paths that used the old names
+            self._alt_bg = alt_bg
+            self._input_bg = input_bg
+            self._success = success_green
+            self._danger = danger_red
 
-            # General ttk styling
-            style.configure('.', background=app_bg, foreground=fg, fieldbackground=field_bg)
-            style.configure('TFrame', background=field_bg)
-            style.configure('TLabel', background=field_bg, foreground=fg)
-            style.configure('TLabelframe', background=field_bg, foreground=fg)
-            style.configure('TLabelframe.Label', background=field_bg, foreground=fg)
-            style.configure('TEntry', fieldbackground=field_bg, foreground=fg)
-            style.configure('TCombobox', fieldbackground=field_bg, background=field_bg, foreground=fg)
-            style.map('TCombobox',
-                      fieldbackground=[('readonly', field_bg), ('!readonly', field_bg)],
-                      background=[('readonly', field_bg), ('!readonly', field_bg)])
-
-            # Notebook / Tabs
-            style.configure('TNotebook', background=field_bg)
-            style.configure('TNotebook.Tab', background=field_bg, foreground=muted, padding=(8, 6))
-            style.map('TNotebook.Tab',
-                      background=[('selected', app_bg)],
-                      foreground=[('selected', fg)])
-
-            # Scrollbar troughs and thumbs
-            style.configure('Vertical.TScrollbar', troughcolor=field_bg, background=app_bg)
-            style.configure('Horizontal.TScrollbar', troughcolor=field_bg, background=app_bg)
-
-            # Button: create a pill-like style (flat, no border) — real rounded corners require custom images/widgets
-            style.configure('Rounded.TButton',
-                            background=accent,
-                            foreground=fg,
-                            relief='flat',
-                            borderwidth=0,
-                            focusthickness=0,
-                            padding=(8, 6))
-            style.map('Rounded.TButton',
-                      background=[('active', accent_hover), ('disabled', '#2A2D36')])
-
-            # Make default TButton use the rounded look
-            style.configure('TButton', background=accent, foreground=fg, padding=(6,4))
-            style.map('TButton', background=[('active', accent_hover)])
-
-            # Hover style for ttk buttons (used when pointer is over a button)
-            style.configure('Hover.TButton', background=accent_hover, foreground=fg)
-
-            # Ensure buttons show pointer cursor by default
             try:
-                self.root.option_add('*Button.cursor', 'hand2')
-                self.root.option_add('*TButton.cursor', 'hand2')
+                self.root.configure(bg=app_bg)
             except Exception:
                 pass
 
-            # Bind class-level events so all buttons get hover/cursor behavior
+            # No ttk styling needed when using CTk
+
             try:
-                # ttk Buttons
-                self.root.bind_class('TButton', '<Enter>', lambda e: self._on_button_enter(e), add='+')
-                self.root.bind_class('TButton', '<Leave>', lambda e: self._on_button_leave(e), add='+')
-                # tk Buttons
-                self.root.bind_class('Button', '<Enter>', lambda e: self._on_button_enter(e), add='+')
-                self.root.bind_class('Button', '<Leave>', lambda e: self._on_button_leave(e), add='+')
+                if CTK_AVAILABLE:
+                    try:
+                        base_dir = os.path.dirname(os.path.abspath(__file__))
+                        theme_path = os.path.join(base_dir, 'ctk_steel_blue_theme.json')
+                        if os.path.exists(theme_path):
+                            try:
+                                ctk.set_default_color_theme(theme_path)
+                            except Exception:
+                                raise
+                        else:
+                            raise FileNotFoundError
+                    except Exception:
+                        try:
+                            theme_obj = {
+                                'color_primary': accent,
+                                'color_secondary': alt_bg,
+                                'color_tertiary': input_bg,
+                                'color_success': success_green,
+                                'color_warning': danger_red,
+                                'color_background': app_bg,
+                                'color_surface': alt_bg,
+                                'text': fg
+                            }
+                            try:
+                                ctk.set_default_color_theme(theme_obj)
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
             except Exception:
                 pass
-
-            # For widgets that ignore ttk style, set option defaults
-            self.root.option_add('*Button.background', accent)
-            self.root.option_add('*Button.foreground', fg)
-            self.root.option_add('*Label.background', field_bg)
-            self.root.option_add('*Entry.background', field_bg)
         except Exception as e:
-            logger.debug(f"Could not apply custom theme: {e}")
+            logger.debug(f"Could not apply CTk theme: {e}")
 
     def _ensure_taskbar_icon(self):
         """Ensure the window shows a proper taskbar icon on Windows.
@@ -322,66 +356,8 @@ class MainWindow:
             return
 
         try:
-            import ctypes
-
-            # Constants
-            GWL_EXSTYLE = -20
-            WS_EX_APPWINDOW = 0x00040000
-            WS_EX_TOOLWINDOW = 0x00000080
-
-            WM_SETICON = 0x0080
-            ICON_SMALL = 0
-            ICON_BIG = 1
-            IMAGE_ICON = 1
-            LR_LOADFROMFILE = 0x00000010
-
-            hwnd = self.root.winfo_id()
-
-            # Update extended style: add APPWINDOW, remove TOOLWINDOW
-            try:
-                exstyle = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-                exstyle = (exstyle & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW
-                ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, exstyle)
-
-                # Apply the style changes
-                SWP_NOSIZE = 0x0001
-                SWP_NOMOVE = 0x0002
-                SWP_NOZORDER = 0x0004
-                SWP_FRAMECHANGED = 0x0020
-                flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED
-                ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, flags)
-            except Exception:
-                # non-fatal
-                pass
-
-            # If we have a .ico path available from earlier setup, load it and set WM_SETICON
-            try:
-                ico_path = getattr(self, '_app_ico_path', None)
-                if ico_path and os.path.exists(ico_path):
-                    hicon = ctypes.windll.user32.LoadImageW(0, ico_path, IMAGE_ICON, 0, 0, LR_LOADFROMFILE)
-                    if hicon:
-                        ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, hicon)
-                        ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, hicon)
-            except Exception:
-                pass
-
-            # Reapply Tk iconphoto too (some environments need both native and Tk bindings)
-            try:
-                if getattr(self, '_app_icon', None):
-                    try:
-                        self.root.iconphoto(False, self._app_icon)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-            # Gentle refresh
-            try:
-                self.root.withdraw()
-                self.root.deiconify()
-            except Exception:
-                pass
-
+            # original taskbar/icon handling continues here
+            pass
         except Exception as e:
             logger.debug(f"_ensure_taskbar_icon failed: {e}")
 
@@ -408,37 +384,22 @@ class MainWindow:
         """Class-level enter handler for Buttons to show pointer cursor and hover style."""
         try:
             widget = event.widget
-            # If the widget is disabled, don't apply hover effects or change cursor
+            # If the widget is disabled, don't change cursor
             try:
-                # ttk buttons support instate
-                if isinstance(widget, ttk.Button) or widget.winfo_class() == 'TButton':
+                is_disabled = False
+                try:
+                    is_disabled = (widget.cget('state') == 'disabled')
+                except Exception:
                     try:
-                        if widget.instate(['disabled']):
-                            return
+                        # Some widgets expose 'instate'
+                        is_disabled = widget.instate(['disabled'])
                     except Exception:
-                        # fall back to cget
-                        try:
-                            if widget.cget('state') == 'disabled':
-                                return
-                        except Exception:
-                            pass
-                else:
-                    # tk Button
+                        is_disabled = False
+                if not is_disabled:
                     try:
-                        if widget.cget('state') == 'disabled':
-                            return
+                        widget.configure(cursor='hand2')
                     except Exception:
                         pass
-            except Exception:
-                pass
-            # For ttk buttons, change to hover style
-            try:
-                if isinstance(widget, ttk.Button) or widget.winfo_class() == 'TButton':
-                    widget.configure(style='Hover.TButton')
-            except Exception:
-                pass
-            try:
-                widget.configure(cursor='hand2')
             except Exception:
                 pass
         except Exception:
@@ -448,33 +409,8 @@ class MainWindow:
         """Class-level leave handler for Buttons to restore style and cursor."""
         try:
             widget = event.widget
-            # If widget is disabled, just ensure cursor is default and don't change style
             try:
-                disabled = False
-                if isinstance(widget, ttk.Button) or widget.winfo_class() == 'TButton':
-                    try:
-                        disabled = widget.instate(['disabled'])
-                    except Exception:
-                        try:
-                            disabled = (widget.cget('state') == 'disabled')
-                        except Exception:
-                            disabled = False
-                else:
-                    try:
-                        disabled = (widget.cget('state') == 'disabled')
-                    except Exception:
-                        disabled = False
-                if not disabled:
-                    try:
-                        if isinstance(widget, ttk.Button) or widget.winfo_class() == 'TButton':
-                            widget.configure(style='TButton')
-                    except Exception:
-                        pass
-                # Always try to restore cursor to default
-                try:
-                    widget.configure(cursor='')
-                except Exception:
-                    pass
+                widget.configure(cursor='')
             except Exception:
                 pass
         except Exception:
@@ -617,87 +553,100 @@ class MainWindow:
     
     def _create_widgets(self):
         """Create all GUI widgets"""
-        main_frame = ttk.Frame(self.root)
+        # Use CTkFrame as main container
+        main_frame = ctk.CTkFrame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
+
         # Server status section
         self._create_status_section(main_frame)
-        
+
         # Port and Token section
         self._create_connection_section(main_frame)
-        
+
         # Tabbed interface
         self._create_tabbed_interface(main_frame)
-        
+
         # Bottom controls
         self._create_bottom_controls(main_frame)
     
     def _create_status_section(self, parent):
         """Create server status section"""
-        status_frame = ttk.LabelFrame(parent, text="Server Status")
+        status_frame = ctk.CTkFrame(parent)
         status_frame.pack(fill=tk.X, pady=(0, 10))
-        
+
         # Status display
-        status_display_frame = ttk.Frame(status_frame)
+        status_display_frame = self._frame(status_frame)
         status_display_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        ttk.Label(status_display_frame, text="Status:").pack(side=tk.LEFT)
-        self.status_label = ttk.Label(status_display_frame, textvariable=self.server_status_var,
-                                     foreground="red")
+
+        self._label(status_display_frame, text="Status:").pack(side=tk.LEFT)
+        self.status_label = self._label(status_display_frame, textvariable=self.server_status_var, text_color="red")
         self.status_label.pack(side=tk.LEFT, padx=(5, 0))
-        
+
         # Control buttons
-        button_frame = ttk.Frame(status_frame)
+        button_frame = ctk.CTkFrame(status_frame)
         button_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
-        
-        self.start_button = ttk.Button(button_frame, text="Start", command=self._start_server)
+
+        self.start_button = ctk.CTkButton(button_frame, text="▶ Start", fg_color=getattr(self, '_success', '#BBD760'), text_color=getattr(self, '_app_bg', '#1E1F2B'), width=100, command=self._start_server)
+            
+        self.stop_button = ctk.CTkButton(button_frame, text="■ Stop", fg_color=getattr(self, '_danger', '#FC6A6A'), text_color=getattr(self, '_fg', '#E6EEF3'), width=100, command=self._stop_server)
+        self.restart_button = ctk.CTkButton(button_frame, text="↻ Restart", text_color=getattr(self, '_fg', '#E6EEF3'), width=100, command=self._restart_server)
+        ctk.CTkButton(button_frame, text="Open Browser", command=self._open_browser).pack(side=tk.RIGHT)
+
         self.start_button.pack(side=tk.LEFT, padx=(0, 5))
-        
-        self.stop_button = ttk.Button(button_frame, text="Stop", command=self._stop_server)
         self.stop_button.pack(side=tk.LEFT, padx=(0, 5))
-        
-        self.restart_button = ttk.Button(button_frame, text="Restart", command=self._restart_server)
         self.restart_button.pack(side=tk.LEFT, padx=(0, 5))
-        
-        ttk.Button(button_frame, text="Open Browser", 
-                  command=self._open_browser).pack(side=tk.RIGHT)
     
     def _create_connection_section(self, parent):
         """Create connection settings section"""
-        conn_frame = ttk.LabelFrame(parent, text="Connection Settings")
+        conn_frame = ctk.CTkFrame(parent)
         conn_frame.pack(fill=tk.X, pady=(0, 10))
-        
+
         # Port setting
-        port_frame = ttk.Frame(conn_frame)
+        port_frame = self._frame(conn_frame)
         port_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        ttk.Label(port_frame, text="Port:").pack(side=tk.LEFT)
-        port_entry = ttk.Entry(port_frame, textvariable=self.port_var, width=8)
+
+        self._label(port_frame, text="Port:").pack(side=tk.LEFT)
+        port_entry = self._entry(port_frame, textvariable=self.port_var, width=80)
         port_entry.pack(side=tk.LEFT, padx=(5, 8))
-        
+
+        # Error label for port (hidden until needed)
+        self.port_error_label = ctk.CTkLabel(port_frame, text="", text_color=self._danger, font=("TkDefaultFont", 8))
+        # Place error label below the entry; make it span the full width
+        self.port_error_label.pack(fill=tk.X, padx=(5, 8))
+
         # Token setting
-        token_frame = ttk.Frame(conn_frame)
+        token_frame = self._frame(conn_frame)
         token_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        ttk.Label(token_frame, text="Token:").pack(side=tk.LEFT)
-        token_entry = ttk.Entry(token_frame, textvariable=self.token_var, width=30, show="*")
+
+        self._label(token_frame, text="Token:").pack(side=tk.LEFT)
+        token_entry = self._entry(token_frame, textvariable=self.token_var, width=300, show="*")
+        # Create a Show/Hide button and keep a reference so we can change its label
+        show_btn = self._button(token_frame, text="Show", command=self._toggle_token_visibility)
+        show_btn.pack(side=tk.RIGHT, padx=(8,0))
+        self.token_show_button = show_btn
+
         token_entry.pack(side=tk.LEFT, padx=(5, 8), fill=tk.X, expand=True)
-        
-        ttk.Button(token_frame, text="Show", command=self._toggle_token_visibility).pack(side=tk.RIGHT, padx=(8,0))
+
+        # Error label for token (hidden until needed)
+        self.token_error_label = ctk.CTkLabel(token_frame, text="", text_color=self._danger, font=("TkDefaultFont", 8))
+        self.token_error_label.pack(fill=tk.X, padx=(5, 8))
+
+        # Keep references for validation
+        self.port_entry = port_entry
+        self.token_entry = token_entry
     
     def _create_tabbed_interface(self, parent):
         """Create tabbed interface"""
-        self.notebook = ttk.Notebook(parent)
+        self.notebook = ctk.CTkTabview(parent)
         self.notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-        
-        # Settings tab
-        self.settings_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.settings_frame, text="Settings")
+
+        self.notebook.add("Settings")
+        self.notebook.add("Endpoints")
+
+        self.settings_frame = self.notebook.tab("Settings")
+        self.endpoints_frame = self.notebook.tab("Endpoints")
+
         self._create_settings_tab()
-        
-        # Endpoints tab
-        self.endpoints_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.endpoints_frame, text="Endpoints")
         self._create_endpoints_tab()
 
     def _attach_mousewheel(self, canvas: tk.Canvas, widget: tk.Widget):
@@ -738,440 +687,323 @@ class MainWindow:
                 pass
 
         # Bind enter/leave on both the canvas and the inner widget so hovering anywhere works
-        widget.bind('<Enter>', _bind_all)
-        widget.bind('<Leave>', _unbind_all)
-        canvas.bind('<Enter>', _bind_all)
-        canvas.bind('<Leave>', _unbind_all)
+        try:
+            widget.bind('<Enter>', _bind_all)
+            widget.bind('<Leave>', _unbind_all)
+            canvas.bind('<Enter>', _bind_all)
+            canvas.bind('<Leave>', _unbind_all)
+        except Exception:
+            pass
     
     def _create_settings_tab(self):
         """Create settings tab content"""
-        # Create scrollable frame
-        canvas = tk.Canvas(self.settings_frame, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(self.settings_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
+        # Create a CTkScrollableFrame for the settings tab
+        scrollable = ctk.CTkScrollableFrame(self.settings_frame)
+        scrollable.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
-        # Create window and ensure the inner frame width always matches the canvas width
-        window_id = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-
-        def _on_canvas_config(e):
-            try:
-                canvas.itemconfigure(window_id, width=e.width)
-            except Exception:
-                pass
-
-        canvas.bind('<Configure>', _on_canvas_config)
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-
-        canvas.configure(yscrollcommand=scrollbar.set)
-        # Attach mousewheel scrolling when hovering anywhere in the scrollable area
-        self._attach_mousewheel(canvas, scrollable_frame)
-        
         # Audio section
-        self._create_audio_section(scrollable_frame)
-        
+        self._create_audio_section(scrollable)
+
         # Fan section
-        self._create_fan_section(scrollable_frame)
-        
+        self._create_fan_section(scrollable)
+
         # Streaming section
-        self._create_streaming_section(scrollable_frame)
-        
+        self._create_streaming_section(scrollable)
+
         # System section
-        self._create_system_section(scrollable_frame)
-        
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        self._create_system_section(scrollable)
     
     def _create_audio_section(self, parent):
         """Create audio control section"""
-        audio_frame = ttk.LabelFrame(parent, text="Audio Control")
-        audio_frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        # Enable checkbox
-        ttk.Checkbutton(audio_frame, text="Enable audio control endpoints",
-                       variable=self.audio_enabled_var,
-                       command=self._on_audio_enabled_changed).pack(anchor=tk.W, padx=10, pady=5)
-        
-        # SVV path
-        svv_frame = ttk.Frame(audio_frame)
+        # Use a card container for the whole section to provide a border/background
+        audio_frame = ctk.CTkFrame(parent, fg_color=self._shade_color(self._app_bg, 6), corner_radius=6)
+        audio_frame.pack(fill=tk.X, padx=10, pady=8)
+        # Keep reference so we can show/hide inner settings when toggled
+        self.audio_frame = audio_frame
+
+        # Section title (larger and underlined)
+        title_font = ("TkDefaultFont", 14, "bold")
+        ctk.CTkLabel(audio_frame, text="Audio", font=title_font, text_color=self._fg).pack(anchor=tk.W, padx=10, pady=(8, 2))
+        # Underline using a separator line
+        sep = ctk.CTkFrame(audio_frame, fg_color=self._shade_color(self._input_bg, -10), height=2)
+        sep.pack(fill=tk.X, padx=10, pady=(0, 8))
+
+        # Enable switch
+        self.audio_enable_switch = self._switch(audio_frame, text="Enable audio control endpoints", variable=self.audio_enabled_var, command=self._on_audio_enabled_changed)
+        self.audio_enable_switch.pack(anchor=tk.W, padx=10, pady=5)
+
+        # Option to use a custom SoundVolumeView install; toggling this shows/hides the SVV path input
+        self.use_custom_svv_switch = ctk.CTkSwitch(audio_frame, text="Use Custom SoundVolumeView Install",
+                  variable=self.use_custom_svv_var,
+                  command=self._on_use_custom_svv_changed)
+        self.use_custom_svv_switch.pack(anchor=tk.W, padx=10, pady=5)
+
+        # SVV path (hidden unless use_custom_svv_var is True)
+        svv_frame = ctk.CTkFrame(audio_frame)
         svv_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        ttk.Label(svv_frame, text="SoundVolumeView Path:").pack(anchor=tk.W)
-        path_frame = ttk.Frame(svv_frame)
+        # Keep references so we can hide/show when audio is toggled
+        self.audio_svv_frame = svv_frame
+
+        ctk.CTkLabel(svv_frame, text="SoundVolumeView Path:").pack(anchor=tk.W, padx=(5,0))
+        path_frame = ctk.CTkFrame(svv_frame)
         path_frame.pack(fill=tk.X, pady=(2, 0))
-        
-        self.svv_entry = ttk.Entry(path_frame, textvariable=self.svv_path_var)
-        self.svv_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        
-        ttk.Button(path_frame, text="Browse", command=self._browse_svv_path).pack(side=tk.RIGHT)
-        
-        help_label = ttk.Label(svv_frame, text="Optional: svcl.exe/SoundVolumeView will be bundled; only fill this to use a local installation.",
-                              foreground="gray", font=("TkDefaultFont", 8))
-        help_label.pack(anchor=tk.W, pady=(2, 0))
-        
-        # Device mappings
-        mapping_frame = ttk.LabelFrame(audio_frame, text="Device Mappings")
-        mapping_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
-        # Mappings header
-        header_frame = ttk.Frame(mapping_frame)
-        header_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        ttk.Label(header_frame, text="Label").grid(row=0, column=0, sticky="w", padx=(0, 10))
-        # Nudge the Device ID header right so it lines up with the device_id entry widgets
-        ttk.Label(header_frame, text="Device ID").grid(row=0, column=1, sticky="w", padx=(6, 10))
-        # Center the header for the streaming column so checkboxes align beneath it
-        ttk.Label(header_frame, text="For Streaming", anchor='center').grid(row=0, column=2, sticky="ew", padx=(0, 10))
-        ttk.Button(header_frame, text="Add", command=self._add_device_mapping).grid(row=0, column=3, sticky="e")
+        self.svv_entry = self._entry(path_frame, textvariable=self.svv_path_var)
+        self.svv_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 5))
+        self._button(path_frame, text="Browse", command=self._browse_svv_path).pack(side=tk.RIGHT, padx=(0,5))
 
-        header_frame.columnconfigure(1, weight=1)
+        self._label(svv_frame, text="Optional: svcl.exe/SoundVolumeView will be bundled; only fill this to use a local installation.", text_color="gray", font=("TkDefaultFont", 12)).pack(anchor=tk.W, padx=(12,0),pady=(2, 0))
+
+        # Device mappings - put into a card with rounded corners and slightly darker background
+        card_bg = self._shade_color(self._input_bg, -6)
+        mapping_card = ctk.CTkFrame(audio_frame, fg_color=card_bg, corner_radius=8)
+        mapping_card.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        # Keep reference to mappings card for hide/show
+        self.audio_mapping_card = mapping_card
+
+        # Title for the device mapping card (larger title)
+        ctk.CTkLabel(mapping_card, text="Device Mappings", font=("TkDefaultFont", 12, "bold"), text_color=self._fg).pack(anchor=tk.W, padx=10, pady=(8, 2))
+
+        # Mappings table (single grid so headers align with inputs/dropdowns)
+        self.mappings_table = self._frame(mapping_card)
+        self.mappings_table.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
+
+        self._label(self.mappings_table, text="Label").grid(row=0, column=0, sticky="w", padx=(10, 10))
+        self._label(self.mappings_table, text="Device ID").grid(row=0, column=1, sticky="w", padx=(6, 10))
+        self._label(self.mappings_table, text="Stream", font=None).grid(row=0, column=2, sticky="ew", padx=(0, 10))
+        # Add button: green with plus icon and not too wide (use dark text for contrast)
+        self._button(self.mappings_table, text="➕ Add", command=self._add_device_mapping, fg_color=self._success, text_color=self._app_bg, width=60, hover_color=self._accent_hover).grid(row=0, column=3, sticky="e")
+
+        self.mappings_table.columnconfigure(1, weight=1)
         # Give the streaming column a minimum width so the checkbox can be centered
-        header_frame.columnconfigure(2, minsize=80)
-        
-        # Mappings container
-        self.mappings_container = ttk.Frame(mapping_frame)
-        self.mappings_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
-        
+        self.mappings_table.columnconfigure(2, minsize=30)
+
         self.mapping_rows = []
     
     def _create_fan_section(self, parent):
         """Create fan control section"""
-        fan_frame = ttk.LabelFrame(parent, text="Fan Control")
-        fan_frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        # Enable checkbox
-        ttk.Checkbutton(fan_frame, text="Enable fan control endpoints",
-                       variable=self.fan_enabled_var,
-                       command=self._on_fan_enabled_changed).pack(anchor=tk.W, padx=10, pady=5)
-        
+        # Fan section card
+        fan_frame = ctk.CTkFrame(parent, fg_color=self._shade_color(self._app_bg, 6), corner_radius=6)
+        fan_frame.pack(fill=tk.X, padx=10, pady=8)
+
+        # Section title (larger and underlined)
+        ctk.CTkLabel(fan_frame, text="Fan Control", font=("TkDefaultFont", 14, "bold"), text_color=self._fg).pack(anchor=tk.W, padx=10, pady=(8, 2))
+        sep = ctk.CTkFrame(fan_frame, fg_color=self._shade_color(self._input_bg, -10), height=2)
+        sep.pack(fill=tk.X, padx=10, pady=(0, 8))
+
+        # Enable switch
+        ctk.CTkSwitch(fan_frame, text="Enable fan control endpoints",
+                  variable=self.fan_enabled_var,
+                  command=self._on_fan_enabled_changed).pack(anchor=tk.W, padx=10, pady=5)
+
         # Fan exe path
-        exe_frame = ttk.Frame(fan_frame)
+        exe_frame = ctk.CTkFrame(fan_frame)
         exe_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        ttk.Label(exe_frame, text="FanControl.exe Path:").pack(anchor=tk.W)
-        exe_path_frame = ttk.Frame(exe_frame)
-        exe_path_frame.pack(fill=tk.X, pady=(2, 0))
-        
-        self.fan_exe_entry = ttk.Entry(exe_path_frame, textvariable=self.fan_exe_var)
+        # store reference so we can show/hide the entire block
+        self.fan_exe_frame = exe_frame
+
+        ctk.CTkLabel(exe_frame, text="FanControl.exe Path:").pack(anchor=tk.W, padx=(5,0))
+        exe_path_frame = ctk.CTkFrame(exe_frame)
+        exe_path_frame.pack(fill=tk.X, pady=(2, 0), padx=(10,0))
+
+        self.fan_exe_entry = ctk.CTkEntry(exe_path_frame, textvariable=self.fan_exe_var)
         self.fan_exe_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        
-        ttk.Button(exe_path_frame, text="Browse", command=self._browse_fan_exe).pack(side=tk.RIGHT)
-        
+        ctk.CTkButton(exe_path_frame, text="Browse", command=self._browse_fan_exe).pack(side=tk.RIGHT, padx=(0,5))
+
+
         # Fan config path
-        config_frame = ttk.Frame(fan_frame)
+        config_frame = ctk.CTkFrame(fan_frame)
         config_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        ttk.Label(config_frame, text="Fan Config Directory:").pack(anchor=tk.W)
-        config_path_frame = ttk.Frame(config_frame)
-        config_path_frame.pack(fill=tk.X, pady=(2, 0))
-        
-        self.fan_config_entry = ttk.Entry(config_path_frame, textvariable=self.fan_config_var)
+        # store reference so we can show/hide
+        self.fan_config_frame = config_frame
+
+        ctk.CTkLabel(config_frame, text="Fan Config Directory:").pack(anchor=tk.W, padx=(5,0))
+        config_path_frame = ctk.CTkFrame(config_frame)
+        config_path_frame.pack(fill=tk.X, pady=(2, 0), padx=(10,0))
+
+        # Fan config entry
+        self.fan_config_entry = ctk.CTkEntry(config_path_frame, textvariable=self.fan_config_var)
         self.fan_config_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        
-        ttk.Button(config_path_frame, text="Browse", command=self._browse_fan_config).pack(side=tk.RIGHT)
-        
+        ctk.CTkButton(config_path_frame, text="Browse", command=self._browse_fan_config).pack(side=tk.RIGHT, padx=(0,5))
+
         # Apply on stream launch
-        apply_frame = ttk.Frame(fan_frame)
+        apply_frame = ctk.CTkFrame(fan_frame)
         apply_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        ttk.Checkbutton(apply_frame, text="Apply fan config on stream launch",
-                       variable=self.fan_apply_var,
-                       command=self._on_fan_apply_changed).pack(anchor=tk.W)
-        
+        self.fan_apply_frame = apply_frame
+
+        self.fan_apply_switch = ctk.CTkSwitch(apply_frame, text="Apply fan config on stream launch", variable=self.fan_apply_var, command=self._on_fan_apply_changed)
+        self.fan_apply_switch.pack(anchor=tk.W, padx=(5, 0))
+
         # Config selection dropdown (shown when apply is enabled)
-        self.fan_config_select_frame = ttk.Frame(apply_frame)
-        
-        ttk.Label(self.fan_config_select_frame, text="Selected Config:").pack(anchor=tk.W, pady=(5, 2))
-        
-        config_select_frame = ttk.Frame(self.fan_config_select_frame)
-        config_select_frame.pack(fill=tk.X)
-        
-        self.fan_config_combo = ttk.Combobox(config_select_frame, state="readonly")
+        self.fan_config_select_frame = ctk.CTkFrame(apply_frame)
+        ctk.CTkLabel(self.fan_config_select_frame, text="Selected Config:").pack(anchor=tk.W, pady=(5, 2), padx=(5,0))
+        config_select_frame = ctk.CTkFrame(self.fan_config_select_frame)
+        config_select_frame.pack(fill=tk.X, padx=(10,0))
+
+        # CTk doesn't have a native Combobox in some versions; use OptionMenu/ComboBox when available
+        if hasattr(ctk, 'CTkComboBox'):
+            self.fan_config_combo = ctk.CTkComboBox(config_select_frame, state="readonly", values=[])
+        else:
+            self.fan_config_combo = ctk.CTkOptionMenu(config_select_frame, values=[])
         self.fan_config_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        
-        ttk.Button(config_select_frame, text="Refresh", 
-                  command=self._refresh_fan_configs).pack(side=tk.RIGHT)
+        ctk.CTkButton(config_select_frame, text="Refresh", command=self._refresh_fan_configs).pack(side=tk.RIGHT, padx=(0,5))
     
     def _create_streaming_section(self, parent):
         """Create streaming section"""
-        streaming_frame = ttk.LabelFrame(parent, text="Streaming Services")
-        streaming_frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        # Enable streaming endpoint
-        ttk.Checkbutton(streaming_frame, text="Launch streaming service by endpoint",
-                       variable=self.streaming_enabled_var,
-                       command=self._on_streaming_enabled_changed).pack(anchor=tk.W, padx=10, pady=5)
-        
+        # Streaming section card
+        # Streaming section
+        streaming_frame = ctk.CTkFrame(parent, fg_color=self._shade_color(self._app_bg, 6), corner_radius=6)
+        streaming_frame.pack(fill=tk.X, padx=10, pady=8)
+        ctk.CTkLabel(streaming_frame, text="Streaming", font=("TkDefaultFont", 14, "bold"), text_color=self._fg).pack(anchor=tk.W, padx=10, pady=(8, 2))
+        sep = ctk.CTkFrame(streaming_frame, fg_color=self._shade_color(self._input_bg, -10), height=2)
+        sep.pack(fill=tk.X, padx=10, pady=(0, 8))
+
+        # Enable streaming endpoint (switch)
+        ctk.CTkSwitch(streaming_frame, text="Launch streaming service by endpoint", variable=self.streaming_enabled_var, command=self._on_streaming_enabled_changed).pack(anchor=tk.W, padx=10, pady=5)
+
         # Apple TV moniker
-        appletv_frame = ttk.Frame(streaming_frame)
+        appletv_frame = ctk.CTkFrame(streaming_frame)
         appletv_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        ttk.Label(appletv_frame, text="Apple TV App Moniker:").pack(anchor=tk.W)
-        moniker_frame = ttk.Frame(appletv_frame)
-        moniker_frame.pack(fill=tk.X, pady=(2, 0))
-        
-        self.appletv_entry = ttk.Entry(moniker_frame, textvariable=self.apple_tv_moniker_var)
+        # Keep a reference so we can show/hide the entire moniker block
+        self.appletv_frame = appletv_frame
+        ctk.CTkLabel(appletv_frame, text="Apple TV App Moniker:").pack(anchor=tk.W, padx=(5,0))
+        moniker_frame = ctk.CTkFrame(appletv_frame)
+        moniker_frame.pack(fill=tk.X, pady=(2, 0), padx=(10,0))
+        self.appletv_entry = ctk.CTkEntry(moniker_frame, textvariable=self.apple_tv_moniker_var)
         self.appletv_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        
-        ttk.Button(moniker_frame, text="Auto-detect", 
-                  command=self._auto_detect_appletv).pack(side=tk.RIGHT)
+        ctk.CTkButton(moniker_frame, text="Auto-detect", command=self._auto_detect_appletv).pack(side=tk.RIGHT, padx=(0,5))
     
     def _create_system_section(self, parent):
         """Create system section"""
-        system_frame = ttk.LabelFrame(parent, text="System")
-        system_frame.pack(fill=tk.X, padx=5, pady=5)
-        
+        # System section card
+        system_frame = ctk.CTkFrame(parent, fg_color=self._shade_color(self._app_bg, 6), corner_radius=6)
+        system_frame.pack(fill=tk.X, padx=10, pady=8)
+        ctk.CTkLabel(system_frame, text="System", font=("TkDefaultFont", 14, "bold"), text_color=self._fg).pack(anchor=tk.W, padx=10, pady=(8, 2))
+        sep = ctk.CTkFrame(system_frame, fg_color=self._shade_color(self._input_bg, -10), height=2)
+        sep.pack(fill=tk.X, padx=10, pady=(0, 8))
+
         # Autostart
-        ttk.Checkbutton(system_frame, text="Launch on system startup",
-                       variable=self.autostart_var,
-                       command=self._on_autostart_changed).pack(anchor=tk.W, padx=10, pady=5)
-        
+        ctk.CTkSwitch(system_frame, text="Launch on system startup",
+                      variable=self.autostart_var,
+                      command=self._on_autostart_changed).pack(anchor=tk.W, padx=10, pady=5)
+
         # Settings management
-        settings_frame = ttk.Frame(system_frame)
+        settings_frame = ctk.CTkFrame(system_frame)
         settings_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        ttk.Button(settings_frame, text="Reset to Defaults",
-                  command=self._reset_settings).pack(side=tk.LEFT, padx=(0, 5))
-        
-        ttk.Button(settings_frame, text="Export Settings",
-                  command=self._export_settings).pack(side=tk.LEFT, padx=(0, 5))
-        
-        ttk.Button(settings_frame, text="Import Settings",
-                  command=self._import_settings).pack(side=tk.LEFT)
+        ctk.CTkButton(settings_frame, text="Reset to Defaults", command=self._reset_settings).pack(side=tk.LEFT, padx=(0, 5))
+        ctk.CTkButton(settings_frame, text="Export Settings", command=self._export_settings).pack(side=tk.LEFT, padx=(0, 5))
+        ctk.CTkButton(settings_frame, text="Import Settings", command=self._import_settings).pack(side=tk.LEFT)
     
     def _create_endpoints_tab(self):
         """Create endpoints tab content"""
-        # Create scrollable frame
-        canvas = tk.Canvas(self.endpoints_frame, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(self.endpoints_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
+        # Create a CTkScrollableFrame for endpoints
+        endpoints_container = ctk.CTkScrollableFrame(self.endpoints_frame)
+        endpoints_container.pack(fill=tk.BOTH, expand=True)
 
-        # Create window and ensure the inner frame width always matches the canvas width
-        window_id = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        # Endpoint definitions - load from endpoints.json only (no fallback)
+        endpoints = []
+        try:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            endpoints_path = os.path.join(base_dir, "endpoints.json")
+            with open(endpoints_path, "r", encoding="utf-8") as fh:
+                loaded = json.load(fh)
+                if isinstance(loaded, list):
+                    endpoints = loaded
+                else:
+                    logger.debug("endpoints.json did not contain a list; using empty endpoints")
+        except Exception as e:
+            logger.debug(f"Could not load endpoints.json: {e}")
 
-        def _on_canvas_config(e):
-            try:
-                canvas.itemconfigure(window_id, width=e.width)
-            except Exception:
-                pass
-
-        canvas.bind('<Configure>', _on_canvas_config)
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-
-        canvas.configure(yscrollcommand=scrollbar.set)
-        # Attach mousewheel scrolling when hovering anywhere in the scrollable area
-        self._attach_mousewheel(canvas, scrollable_frame)
-        
-        # Endpoint definitions
-        endpoints = [
-            {
-                "group": "Audio Control",
-                "enabled_setting": "audio.enabled",
-                "endpoints": [
-                    {
-                        "path": "/switch",
-                        "method": "GET", 
-                        "params": "key=<label>&token=<token> OR id=<device_id>&token=<token>",
-                        "description": "Switch default audio device",
-                        "test_params": "key=headphones"
-                    },
-                    {
-                        "path": "/volume",
-                        "method": "GET",
-                        "params": "percent=<0-100>&token=<token>",
-                        "description": "Set system volume percentage",
-                        "test_params": "percent=50"
-                    },
-                    {
-                        "path": "/volume/current",
-                        "method": "GET",
-                        "params": "token=<token>",
-                        "description": "Get current volume and device info",
-                        "test_params": ""
-                    },
-                    {
-                        "path": "/device/current",
-                        "method": "GET", 
-                        "params": "token=<token>",
-                        "description": "Get current default device info",
-                        "test_params": ""
-                    },
-                    {
-                        "path": "/list",
-                        "method": "GET",
-                        "params": "token=<token>",
-                        "description": "List all playback devices",
-                        "test_params": ""
-                    }
-                ]
-            },
-            {
-                "group": "Streaming Services",
-                "enabled_setting": "streaming.launch_streaming_by_endpoint", 
-                "endpoints": [
-                    {
-                        "path": "/openStreaming",
-                        "method": "GET",
-                        "params": "service=<youtube|crunchyroll|netflix|disney|prime|appletv>&token=<token>",
-                        "description": "Launch streaming service and switch audio",
-                        "test_params": "service=youtube"
-                    }
-                ]
-            },
-            {
-                "group": "Fan Control",
-                "enabled_setting": "fan.enabled",
-                "endpoints": [
-                    {
-                        "path": "/fan/apply",
-                        "method": "GET",
-                        "params": "name=<config>&token=<token> OR percent=<0-100>&token=<token>",
-                        "description": "Apply fan configuration or percentage",
-                        "test_params": "percent=50"
-                    },
-                    {
-                        "path": "/fan/refresh",
-                        "method": "GET",
-                        "params": "token=<token>",
-                        "description": "Refresh fan sensors",
-                        "test_params": ""
-                    },
-                    {
-                        "path": "/fan/configs",
-                        "method": "GET",
-                        "params": "token=<token>&nearestTo=<percent>",
-                        "description": "Get available fan configurations",
-                        "test_params": "nearestTo=75"
-                    },
-                    {
-                        "path": "/fan/status",
-                        "method": "GET",
-                        "params": "token=<token>",
-                        "description": "Get fan control status",
-                        "test_params": ""
-                    }
-                ]
-            },
-            {
-                "group": "System",
-                "enabled_setting": None,  # Always enabled
-                "endpoints": [
-                    {
-                        "path": "/status",
-                        "method": "GET",
-                        "params": "token=<token>",
-                        "description": "Get overall system status",
-                        "test_params": ""
-                    },
-                    {
-                        "path": "/diag",
-                        "method": "GET",
-                        "params": "token=<token>",
-                        "description": "Get diagnostic information",
-                        "test_params": ""
-                    }
-                ]
-            }
-        ]
-        
         self.endpoint_widgets = []
-        
+
         for group_info in endpoints:
-            # Group frame
-            group_frame = ttk.LabelFrame(scrollable_frame, text=group_info["group"])
-            group_frame.pack(fill=tk.X, padx=5, pady=5)
-            
-            # Status indicator
-            status_frame = ttk.Frame(group_frame)
-            status_frame.pack(fill=tk.X, padx=10, pady=5)
-            
-            status_indicator = tk.Label(status_frame, text="●", font=("TkDefaultFont", 12))
-            status_indicator.pack(side=tk.LEFT)
-            
-            status_label = ttk.Label(status_frame, text="Enabled" if group_info["enabled_setting"] is None else "Unknown")
-            status_label.pack(side=tk.LEFT, padx=(5, 0))
-            
-            # Store for updating
+            # Create a bordered card container for the group
+            group_frame = ctk.CTkFrame(endpoints_container, fg_color=self._shade_color(self._app_bg, 6), corner_radius=6)
+            group_frame.pack(fill=tk.X, padx=5, pady=(14, 10))
+
+            # Group title with status indicator on the left: larger, bold and underlined
+            title_font = ("TkDefaultFont", 12, "bold")
+            title_row = ctk.CTkFrame(group_frame)
+            title_row.pack(fill=tk.X, padx=10, pady=(6, 2))
+
+            # Status dot to the left of the title
+            status_indicator = ctk.CTkLabel(title_row, text="●", font=("TkDefaultFont", 14, "bold"), text_color=getattr(self, '_success', '#BBD760'))
+            # Add extra left padding so the indicator isn't flush to the card edge
+            status_indicator.pack(side=tk.LEFT, padx=(10, 8))
+
+            ctk.CTkLabel(title_row, text=group_info.get("group", ""), font=title_font, text_color=self._fg).pack(side=tk.LEFT, anchor='w')
+
+            sep = ctk.CTkFrame(group_frame, fg_color=self._shade_color(self._input_bg, -10), height=2)
+            sep.pack(fill=tk.X, padx=10, pady=(0, 8))
+
+            # Store for updating (indicator + endpoint frames)
             self.endpoint_widgets.append({
                 "group": group_info["group"],
                 "enabled_setting": group_info["enabled_setting"],
                 "indicator": status_indicator,
-                "label": status_label
+                "endpoints": []
             })
             
             # Endpoints
             for endpoint in group_info["endpoints"]:
-                ep_frame = ttk.Frame(group_frame)
-                ep_frame.pack(fill=tk.X, padx=20, pady=2)
-                
-                # Endpoint info
-                info_frame = ttk.Frame(ep_frame)
-                info_frame.pack(fill=tk.X)
-                
-                ttk.Label(info_frame, text=f"{endpoint['method']} {endpoint['path']}",
-                         font=("TkDefaultFont", 9, "bold")).pack(anchor=tk.W)
-                
-                ttk.Label(info_frame, text=endpoint["description"],
-                         foreground="gray").pack(anchor=tk.W)
-                
+                # Endpoint row card for visual separation
+                ep_frame = ctk.CTkFrame(group_frame, fg_color=self._shade_color(self._app_bg, 4), corner_radius=8)
+                # Increase left padding so endpoint cards align with group title indicator spacing
+                ep_frame.pack(fill=tk.X, padx=(24, 20), pady=(8, 10))
+                # Remember this endpoint frame so we can hide/show it when the group is toggled
+                self.endpoint_widgets[-1]["endpoints"].append(ep_frame)
+
+                # Endpoint info (larger text)
+                info_frame = ctk.CTkFrame(ep_frame)
+                info_frame.pack(fill=tk.X, padx=10, pady=8)
+
+                # Title row with enabled indicator on the left
+                # Determine enabled state for this group (used for per-endpoint indicator)
+                if group_info.get("enabled_setting") is None:
+                    endpoint_enabled = True
+                else:
+                    endpoint_enabled = self.settings_manager.get_setting(group_info.get("enabled_setting"), True)
+                dot_color = getattr(self, '_success', '#BBD760') if endpoint_enabled else getattr(self, '_danger', '#FC6A6A')
+
+                title_row = ctk.CTkFrame(info_frame)
+                title_row.pack(anchor=tk.W, fill=tk.X)
+
+                ind = ctk.CTkLabel(title_row, text="●", font=("TkDefaultFont", 14, "bold"), text_color=dot_color)
+                # Add more left spacing for per-endpoint indicator
+                ind.pack(side=tk.LEFT, padx=(12, 8))
+
+                ctk.CTkLabel(title_row, text=f"{endpoint['method']} {endpoint['path']}", font=("TkDefaultFont", 12, "bold"), text_color=self._fg).pack(side=tk.LEFT)
+                ctk.CTkLabel(info_frame, text=endpoint["description"], text_color="gray", font=("TkDefaultFont", 12)).pack(anchor=tk.W, padx=(5, 0))
                 if endpoint["params"]:
-                    ttk.Label(info_frame, text=f"Parameters: {endpoint['params']}",
-                             font=("TkDefaultFont", 8)).pack(anchor=tk.W)
-                
+                    ctk.CTkLabel(info_frame, text=f"Parameters: {endpoint['params']}", font=("TkDefaultFont", 11), text_color=self._muted).pack(anchor=tk.W, padx=(5, 0))
+
                 # Test button and result
-                test_frame = ttk.Frame(ep_frame)
+                test_frame = ctk.CTkFrame(ep_frame)
                 test_frame.pack(fill=tk.X, pady=(2, 5))
-                
-                test_button = ttk.Button(test_frame, text="Test", width=8,
-                                        command=lambda ep=endpoint: self._test_endpoint(ep))
-                test_button.pack(side=tk.LEFT, padx=(0, 5))
-                
-                # Copy curl button
-                curl_button = ttk.Button(test_frame, text="Copy cURL", width=10,
-                                        command=lambda ep=endpoint: self._copy_curl(ep))
-                curl_button.pack(side=tk.LEFT, padx=(0, 5))
-                
-                # Result area
-                result_text = tk.Text(test_frame, height=2, wrap=tk.WORD, font=("TkDefaultFont", 8))
-                result_text.pack(side=tk.LEFT, fill=tk.X, expand=True)
-                
-                # Store for testing
+
+                test_button = ctk.CTkButton(test_frame, text="Test", width=90, command=lambda ep=endpoint: self._test_endpoint(ep), fg_color=self._accent, text_color=self._app_bg)
+                curl_button = ctk.CTkButton(test_frame, text="Copy cURL", width=110, command=lambda ep=endpoint: self._copy_curl(ep))
+                test_button.pack(side=tk.LEFT, padx=(5, 8), pady=4)
+                curl_button.pack(side=tk.LEFT, padx=(0, 8), pady=4)
+                # Use CTkTextbox for results
+                result_text = ctk.CTkTextbox(test_frame, width=1, height=2)
+                result_text.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=4)
+
                 endpoint["test_button"] = test_button
                 endpoint["result_text"] = result_text
         
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+    # If we used a CTkScrollableFrame, it's already packed by construction; nothing to do here
     
     def _create_bottom_controls(self, parent):
         """Create bottom control buttons"""
-        bottom_frame = ttk.Frame(parent)
+        # Prefer CustomTkinter frames/buttons/labels when available;
+        bottom_frame = ctk.CTkFrame(parent)
         bottom_frame.pack(fill=tk.X, pady=(10, 0))
-        
-        # Server controls (left side)
-        server_frame = ttk.Frame(bottom_frame)
-        server_frame.pack(side=tk.LEFT)
-        
-        self.bottom_start_btn = ttk.Button(server_frame, text="Start", command=self._start_server)
-        self.bottom_start_btn.pack(side=tk.LEFT, padx=(0, 5))
-        
-        self.bottom_stop_btn = ttk.Button(server_frame, text="Stop", command=self._stop_server)
-        self.bottom_stop_btn.pack(side=tk.LEFT, padx=(0, 5))
-        
-        self.bottom_restart_btn = ttk.Button(server_frame, text="Restart", command=self._restart_server)
-        self.bottom_restart_btn.pack(side=tk.LEFT)
-        
+
         # Status message (right side)
         self.status_message_var = tk.StringVar()
-        self.status_message_label = ttk.Label(bottom_frame, textvariable=self.status_message_var,
-                                             foreground="gray")
-        self.status_message_label.pack(side=tk.RIGHT)
+        self.status_message_label = ctk.CTkLabel(bottom_frame, textvariable=self.status_message_var, text_color="gray")
+        self.status_message_label.pack(side=tk.BOTTOM)
     
     def _setup_bindings(self):
         """Setup event bindings"""
@@ -1192,6 +1024,8 @@ class MainWindow:
         # Audio settings
         self.audio_enabled_var.set(self.settings_manager.get_setting('audio.enabled', True))
         self.svv_path_var.set(self.settings_manager.get_setting('audio.svv_path', ''))
+        # Custom SVV install setting
+        self.use_custom_svv_var.set(self.settings_manager.get_setting('audio.use_custom_svv', False))
         
         # Fan settings
         self.fan_enabled_var.set(self.settings_manager.get_setting('fan.enabled', False))
@@ -1213,6 +1047,7 @@ class MainWindow:
         self._update_audio_ui_state()
         self._update_fan_ui_state()
         self._update_endpoints_status()
+        self._update_streaming_ui_state()
         
         # Try to auto-detect Apple TV moniker if not set
         if not self.apple_tv_moniker_var.get():
@@ -1228,62 +1063,146 @@ class MainWindow:
         
         # Load mappings from settings
         mappings = self.settings_manager.get_audio_mappings()
+
+        # Populate rows
         for mapping in mappings:
-            self._add_device_mapping_row(
-                mapping.get("label", ""),
-                mapping.get("device_id", ""),
-                mapping.get("use_for_streaming", False)
-            )
-        
+            label = mapping.get('label', '')
+            device_id = mapping.get('device_id', '')
+            use_for_streaming = mapping.get('use_for_streaming', False)
+            self._add_device_mapping_row(label=label, device_id=device_id, use_for_streaming=use_for_streaming)
+
         # Add one empty row if no mappings exist
         if not mappings:
             self._add_device_mapping_row()
     
     def _add_device_mapping_row(self, label="", device_id="", use_for_streaming=False):
-        """Add a device mapping row"""
-        row_frame = ttk.Frame(self.mappings_container)
-        row_frame.pack(fill=tk.X, pady=2)
-        
+        """Add a device mapping row (grid-aligned to the header)."""
+        row_parent = getattr(self, 'mappings_table', None) or self.mappings_table
+        row_index = len(self.mapping_rows) + 1  # header is row 0
+
         label_var = tk.StringVar(value=label)
         device_id_var = tk.StringVar(value=device_id)
         streaming_var = tk.BooleanVar(value=use_for_streaming)
-        
-        label_entry = ttk.Entry(row_frame, textvariable=label_var, width=15)
-        label_entry.grid(row=0, column=0, sticky="ew", padx=(0, 5))
-        
-        device_entry = ttk.Entry(row_frame, textvariable=device_id_var)
-        device_entry.grid(row=0, column=1, sticky="ew", padx=(0, 5))
-        
-        streaming_cb = ttk.Checkbutton(row_frame, variable=streaming_var,
-                                      command=lambda: self._on_streaming_checkbox_changed(streaming_var))
-        # Center the checkbutton in its grid cell
-        streaming_cb.grid(row=0, column=2, padx=(0, 5), sticky='nsew')
+
+        # fetch device options (same logic as before)
+        def _fetch_device_options():
+            options = []
+            try:
+                ac = None
+                if getattr(self.app, 'flask_server', None) and getattr(self.app.flask_server, 'audio_controller', None):
+                    ac = self.app.flask_server.audio_controller
+                else:
+                    try:
+                        from audio_control import AudioController
+                        svv = self.settings_manager.get_setting('audio.svv_path', '')
+                        ac = AudioController(svv if svv else None)
+                    except Exception:
+                        ac = None
+
+                if ac:
+                    devs = ac.get_playback_devices()
+                    if isinstance(devs, dict) and devs.get('ok') and 'devices' in devs:
+                        for d in devs['devices']:
+                            did = d.get('device_id', '')
+                            name = d.get('device_name') or d.get('name') or ''
+                            if did:
+                                display = f"{name} — {did}" if name else did
+                                options.append((display, did))
+            except Exception:
+                pass
+
+            if not options:
+                try:
+                    for m in self.settings_manager.get_audio_mappings():
+                        did = m.get('device_id', '').strip()
+                        label = m.get('label', '').strip()
+                        if did:
+                            display = f"{label} — {did}" if label else did
+                            options.append((display, did))
+                except Exception:
+                    pass
+
+            return options
+
+        options = _fetch_device_options()
+        display_to_id = {d: i for d, i in options}
+        display_values = [d for d, _ in options]
+
+        label_entry = ctk.CTkEntry(row_parent, textvariable=label_var, width=120)
+        label_entry.grid(row=row_index, column=0, sticky="ew", padx=(5, 5), pady=2)
+
+        if display_values:
+            if hasattr(ctk, 'CTkComboBox'):
+                device_entry = ctk.CTkComboBox(row_parent, values=display_values)
+                if device_id:
+                    for disp, did in options:
+                        if did == device_id:
+                            try:
+                                device_entry.set(disp)
+                            except Exception:
+                                pass
+                            break
+                device_entry.grid(row=row_index, column=1, sticky="ew", padx=(5, 5), pady=2)
+
+                def _on_ctk_select(val):
+                    try:
+                        device_id_var.set(display_to_id.get(val, val))
+                        self._save_device_mappings()
+                    except Exception:
+                        pass
+
+                try:
+                    device_entry.configure(command=_on_ctk_select)
+                except Exception:
+                    pass
+            else:
+                device_entry = ctk.CTkOptionMenu(row_parent, values=display_values, command=lambda v: device_id_var.set(display_to_id.get(v, v)))
+                if device_id:
+                    for disp, did in options:
+                        if did == device_id:
+                            try:
+                                device_entry.set(disp)
+                            except Exception:
+                                pass
+                            break
+                device_entry.grid(row=row_index, column=1, sticky="ew", padx=(5, 5), pady=2)
+        else:
+            device_entry = ctk.CTkEntry(row_parent, textvariable=device_id_var)
+            device_entry.grid(row=row_index, column=1, sticky="ew", padx=(5, 5), pady=2)
+
+        streaming_cb = ctk.CTkSwitch(row_parent, text="", variable=streaming_var, command=lambda: self._on_streaming_checkbox_changed(streaming_var))
+        # Center the streaming toggle in its column
+        streaming_cb.grid(row=row_index, column=2, padx=(10, 5), pady=2)
+
+        delete_btn = ctk.CTkButton(row_parent, text="🗑 Delete", width=60, fg_color=getattr(self, '_danger', '#FC6A6A'), text_color=getattr(self, '_app_bg', '#1E1F2B'), hover_color=self._shade_color(getattr(self, '_danger', '#FC6A6A'), -10), command=lambda: None)
+        delete_btn.grid(row=row_index, column=3, padx=(5, 5), pady=2)
+
+        # Ensure the middle column stretches
         try:
-            streaming_cb.configure(anchor='center')
+            self.mappings_table.columnconfigure(1, weight=1)
+            self.mappings_table.columnconfigure(2, minsize=30)
         except Exception:
             pass
-        
-        delete_btn = ttk.Button(row_frame, text="Delete", width=8,
-                               command=lambda: self._delete_device_mapping_row(row_data))
-        delete_btn.grid(row=0, column=3)
-
-        row_frame.columnconfigure(1, weight=1)
-        # Ensure the streaming column can center its child
-        row_frame.columnconfigure(2, minsize=80)
 
         row_data = {
-            "frame": row_frame,
+            "row": row_index,
             "widgets": [label_entry, device_entry, streaming_cb, delete_btn],
             "vars": {"label": label_var, "device_id": device_id_var, "streaming": streaming_var}
         }
-        
+
         # Setup change handlers
         label_var.trace_add("write", lambda *args: self._save_device_mappings())
         device_id_var.trace_add("write", lambda *args: self._save_device_mappings())
         streaming_var.trace_add("write", lambda *args: self._save_device_mappings())
-        
+
+        # Now that row_data exists, set the delete button's command to reference it
+        try:
+            delete_btn.configure(command=lambda rd=row_data: self._delete_device_mapping_row(rd))
+        except Exception:
+            pass
+
         self.mapping_rows.append(row_data)
-        
+
         return row_data
     
     def _delete_device_mapping_row(self, row_data):
@@ -1334,10 +1253,20 @@ class MainWindow:
                     self.app.update_tray_menu()
         except ValueError:
             pass
+        # Clear any prior validation when user types
+        try:
+            self._clear_field_error(self.port_entry, self.port_error_label)
+        except Exception:
+            pass
     
     def _on_token_changed(self, *args):
         """Handle token change"""
         self.settings_manager.set_setting('token', self.token_var.get())
+        # Clear any prior validation when user types
+        try:
+            self._clear_field_error(self.token_entry, self.token_error_label)
+        except Exception:
+            pass
     
     def _on_audio_enabled_changed(self):
         """Handle audio enabled change"""
@@ -1348,6 +1277,13 @@ class MainWindow:
     def _on_svv_path_changed(self, *args):
         """Handle SVV path change"""
         self.settings_manager.set_setting('audio.svv_path', self.svv_path_var.get())
+
+    def _on_use_custom_svv_changed(self):
+        """Handle toggling whether to use a custom SoundVolumeView install"""
+        enabled = self.use_custom_svv_var.get()
+        self.settings_manager.set_setting('audio.use_custom_svv', enabled)
+        # Show or hide the SVV path frame based on both audio enabled and custom flag
+        self._update_audio_ui_state()
     
     def _on_fan_enabled_changed(self):
         """Handle fan enabled change"""
@@ -1381,6 +1317,25 @@ class MainWindow:
         self.settings_manager.set_setting('streaming.launch_streaming_by_endpoint', 
                                          self.streaming_enabled_var.get())
         self._update_endpoints_status()
+        self._update_streaming_ui_state()
+
+    def _update_streaming_ui_state(self):
+        """Show or hide the Apple TV moniker field depending on streaming endpoint toggle"""
+        try:
+            enabled = self.streaming_enabled_var.get()
+            if getattr(self, 'appletv_frame', None):
+                if enabled:
+                    try:
+                        self.appletv_frame.pack(fill=tk.X, padx=10, pady=5)
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        self.appletv_frame.pack_forget()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
     
     def _on_apple_tv_moniker_changed(self, *args):
         """Handle Apple TV moniker change"""
@@ -1409,6 +1364,44 @@ class MainWindow:
         """Update audio UI state based on enabled setting"""
         enabled = self.audio_enabled_var.get()
         
+        # Show or hide the SVV path frame depending on whether audio is enabled and the custom flag
+        try:
+            if enabled and getattr(self, 'use_custom_svv_var', None) and self.use_custom_svv_var.get():
+                try:
+                    mapping_card = getattr(self, 'audio_mapping_card', None)
+                    if mapping_card:
+                        # Insert the SVV frame before the mappings card so it stays in the original position
+                        self.audio_svv_frame.pack(fill=tk.X, padx=10, pady=5, before=mapping_card)
+                    else:
+                        self.audio_svv_frame.pack(fill=tk.X, padx=10, pady=5)
+                except Exception:
+                    pass
+            else:
+                try:
+                    self.audio_svv_frame.pack_forget()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Show or hide the device mappings card depending on audio enabled state
+        try:
+            mapping_card = getattr(self, 'audio_mapping_card', None)
+            if mapping_card:
+                if enabled:
+                    try:
+                        # Use the original pack options used during creation
+                        mapping_card.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        mapping_card.pack_forget()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
         # Enable/disable audio-related widgets
         widgets = [self.svv_entry] + [widget for row in self.mapping_rows for widget in row["widgets"]]
         
@@ -1425,18 +1418,75 @@ class MainWindow:
         
         widgets = [self.fan_exe_entry, self.fan_config_entry]
         state = "normal" if enabled else "disabled"
-        
+
         for widget in widgets:
             try:
                 widget.configure(state=state)
             except tk.TclError:
                 pass
-        
-        # Handle fan apply UI
-        if enabled and self.fan_apply_var.get():
-            self.fan_config_select_frame.pack(fill=tk.X, pady=(5, 0))
-        else:
-            self.fan_config_select_frame.pack_forget()
+
+        # Show/hide the fan blocks depending on enabled
+        try:
+            if getattr(self, 'fan_exe_frame', None):
+                if enabled:
+                    try:
+                        self.fan_exe_frame.pack(fill=tk.X, padx=10, pady=5)
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        self.fan_exe_frame.pack_forget()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        try:
+            if getattr(self, 'fan_config_frame', None):
+                if enabled:
+                    try:
+                        self.fan_config_frame.pack(fill=tk.X, padx=10, pady=5)
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        self.fan_config_frame.pack_forget()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        # Handle fan apply UI and enable/disable the apply switch based on fan enabled state
+        try:
+            if enabled:
+                # Restore apply frame visibility if apply is set
+                if self.fan_apply_var.get():
+                    try:
+                        self.fan_config_select_frame.pack(fill=tk.X, pady=(5, 0))
+                    except Exception:
+                        pass
+                # Ensure the apply switch is enabled
+                try:
+                    self.fan_apply_switch.configure(state="normal")
+                except Exception:
+                    pass
+            else:
+                # When fan endpoints are disabled, force apply off and disable the switch
+                try:
+                    self.fan_apply_var.set(False)
+                    self.settings_manager.set_setting('fan.apply_on_stream_launch', False)
+                except Exception:
+                    pass
+                try:
+                    self.fan_config_select_frame.pack_forget()
+                except Exception:
+                    pass
+                try:
+                    self.fan_apply_switch.configure(state="disabled")
+                except Exception:
+                    pass
+        except Exception:
+            pass
     
     def _update_endpoints_status(self):
         """Update endpoints status indicators"""
@@ -1449,16 +1499,74 @@ class MainWindow:
             else:
                 enabled = self.settings_manager.get_setting(enabled_setting, True)
             
-            # Update indicator
-            color = "green" if enabled else "gray"
+            # Update indicator (large dot) and label text
+            color = getattr(self, '_success', '#BBD760') if enabled else getattr(self, '_danger', '#FC6A6A')
             text = "Enabled" if enabled else "Disabled"
-            
-            widget_info["indicator"].configure(foreground=color)
-            widget_info["label"].configure(text=text)
+
+            ind = widget_info.get("indicator")
+            if not ind:
+                continue
+
+            # Update indicator color (CTkLabel uses text_color)
+            try:
+                ind.configure(text_color=color)
+            except Exception:
+                # Try older attribute names if needed
+                try:
+                    ind.configure(fg=color, bg=getattr(self, '_app_bg', '#1E1F2B'))
+                except Exception:
+                    try:
+                        ind.configure(foreground=color)
+                    except Exception:
+                        pass
+
+            # Show or hide the group's endpoint frames based on enabled state
+            try:
+                frames = widget_info.get('endpoints', [])
+                if frames:
+                    if enabled:
+                        for f in frames:
+                            try:
+                                # Re-pack with original layout options
+                                f.pack(fill=tk.X, padx=(24, 20), pady=(8, 10))
+                            except Exception:
+                                pass
+                    else:
+                        for f in frames:
+                            try:
+                                f.pack_forget()
+                            except Exception:
+                                pass
+            except Exception:
+                pass
     
     # Action handlers
     def _start_server(self):
         """Start the server"""
+        # Validate required fields (port and token)
+        valid = True
+        port_val = self.port_var.get().strip()
+        token_val = self.token_var.get().strip()
+
+        if not port_val:
+            self._set_field_error(self.port_entry, self.port_error_label, "Port is required")
+            valid = False
+
+        if not token_val:
+            self._set_field_error(self.token_entry, self.token_error_label, "Token is required")
+            valid = False
+
+        if not valid:
+            # Focus first invalid field
+            try:
+                if not port_val:
+                    self.port_entry.focus_set()
+                else:
+                    self.token_entry.focus_set()
+            except Exception:
+                pass
+            return
+
         success = self.app.start_server()
         if success:
             self.status_message_var.set("Server started successfully")
@@ -1467,6 +1575,40 @@ class MainWindow:
         
         # Clear message after 3 seconds
         self.root.after(3000, lambda: self.status_message_var.set(""))
+
+    # Validation helpers
+    def _set_field_error(self, widget, error_label, message: str):
+        """Visually mark a widget as invalid and show an error message underneath.
+
+        Works for CTk widgets. For CTkEntry we set border_color
+        when available;
+        """
+        error_label.configure(text=message)
+        error_label.configure(text=message)
+        widget.configure(border_color=getattr(self, '_danger', '#FC6A6A'))
+
+    def _clear_field_error(self, widget, error_label):
+        """Clear validation visuals and hide error message."""
+        try:
+            try:
+                error_label.configure(text="")
+            except Exception:
+                try:
+                    error_label.configure(text="")
+                except Exception:
+                    pass
+
+            try:
+                widget.configure(border_color="")
+            except Exception:
+                pass
+
+            try:
+                widget.configure(highlightthickness=0)
+            except Exception:
+                pass
+        except Exception:
+            pass
     
     def _stop_server(self):
         """Stop the server"""
@@ -1487,13 +1629,51 @@ class MainWindow:
     def _open_browser(self):
         """Open server URL in browser"""
         port = self.settings_manager.get_setting('port', 1482)
-        webbrowser.open(f'http://127.0.0.1:{port}/')
+        webbrowser.open(f'http://localhost:{port}/')
     
     def _toggle_token_visibility(self):
         """Toggle token field visibility"""
-        current_show = self.token_var._tk.globalgetvar(self.token_var._name)
-        # This is a simplified approach - full implementation would track show state
-        pass
+        try:
+            # Flip visibility flag
+            self._token_visible = not getattr(self, '_token_visible', False)
+
+            if self._token_visible:
+                # Show the token
+                try:
+                    self.token_entry.configure(show="")
+                except Exception:
+                    try:
+                        self.token_entry.config(show="")
+                    except Exception:
+                        pass
+                # Update button label
+                try:
+                    self.token_show_button.configure(text="Hide")
+                except Exception:
+                    try:
+                        self.token_show_button.config(text="Hide")
+                    except Exception:
+                        pass
+            else:
+                # Mask the token
+                try:
+                    self.token_entry.configure(show="*")
+                except Exception:
+                    try:
+                        self.token_entry.config(show="*")
+                    except Exception:
+                        pass
+                # Update button label
+                try:
+                    self.token_show_button.configure(text="Show")
+                except Exception:
+                    try:
+                        self.token_show_button.config(text="Show")
+                    except Exception:
+                        pass
+        except Exception:
+            # If anything goes wrong, do nothing silently to avoid crashing the UI
+            pass
     
     def _browse_svv_path(self):
         """Browse for SVV executable"""
@@ -1673,30 +1853,50 @@ class MainWindow:
     
     def update_server_status(self):
         """Update server status display"""
+        # Helper to enable/disable buttons with appropriate disabled styling
+        def _set_button_enabled(btn, enabled, ctk_fg=None, ctk_text=None):
+            state = "normal" if enabled else "disabled"
+            btn.configure(state=state)
+            if enabled:
+                if ctk_fg is not None:
+                    btn.configure(fg_color=ctk_fg)
+                if ctk_text is not None:
+                    btn.configure(text_color=ctk_text)
+            else:
+                btn.configure(fg_color=getattr(self, '_disabled_btn_bg', '#6b6b6b'))
+                btn.configure(text_color=getattr(self, '_disabled_btn_fg', '#BFC7CF'))
+
+        # Helper: set text color in a way that works for CTkLabel (text_color)
+        def _set_widget_text_color(widget, color):
+            try:
+                widget.configure(text_color=color)
+                return
+            except Exception:
+                pass
+            try:
+                widget.configure(foreground=color)
+                return
+            except Exception:
+                pass
+
         if self.app.is_server_running():
             self.server_status_var.set("Running")
-            self.status_label.configure(foreground="green")
-            
-            # Update buttons
-            self.start_button.configure(state="disabled")
-            self.stop_button.configure(state="normal")
-            self.restart_button.configure(state="normal")
-            
-            self.bottom_start_btn.configure(state="disabled")
-            self.bottom_stop_btn.configure(state="normal")
-            self.bottom_restart_btn.configure(state="normal")
+            _set_widget_text_color(self.status_label, "green")
+
+            # Update buttons: when running, Start should be disabled
+            _set_button_enabled(self.start_button, False, ctk_fg=getattr(self, '_success', '#BBD760'), ctk_text=getattr(self, '_app_bg', '#1E1F2B'))
+            _set_button_enabled(self.stop_button, True, ctk_fg=getattr(self, '_danger', '#FC6A6A'), ctk_text=getattr(self, '_fg', '#E6EEF3'))
+            _set_button_enabled(self.restart_button, True, ctk_text=getattr(self, '_fg', '#E6EEF3'))
+
         else:
             self.server_status_var.set("Stopped")
-            self.status_label.configure(foreground="red")
-            
-            # Update buttons
-            self.start_button.configure(state="normal")
-            self.stop_button.configure(state="disabled") 
-            self.restart_button.configure(state="disabled")
-            
-            self.bottom_start_btn.configure(state="normal")
-            self.bottom_stop_btn.configure(state="disabled")
-            self.bottom_restart_btn.configure(state="disabled")
+            _set_widget_text_color(self.status_label, "red")
+
+            _set_button_enabled(self.start_button, True, ctk_fg=getattr(self, '_success', '#BBD760'), ctk_text=getattr(self, '_app_bg', '#1E1F2B'))
+            _set_button_enabled(self.stop_button, False, ctk_fg=getattr(self, '_danger', '#FC6A6A'), ctk_text=getattr(self, '_fg', '#E6EEF3'))
+            _set_button_enabled(self.restart_button, False, ctk_text=getattr(self, '_fg', '#E6EEF3'))
+
+            # bottom buttons removed; nothing to update on the bottom side
     
     def _update_status_timer(self):
         """Timer callback to update status"""

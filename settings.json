@@ -4,7 +4,7 @@
   "token": "your_secure_token_here",
   "audio": {
     "enabled": true,
-    "svv_path": "",
+    "svv_path": null,
     "mappings": [
       {
         "label": "headphones",

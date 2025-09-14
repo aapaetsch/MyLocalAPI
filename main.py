@@ -8,12 +8,18 @@ import os
 import sys
 import threading
 import time
+try:
+    import customtkinter as ctk
+    CTK_AVAILABLE = True
+except Exception:
+    ctk = None
+    CTK_AVAILABLE = False
 import tkinter as tk
-from tkinter import messagebox
-import pystray
-from PIL import Image, ImageDraw
+from tkinter import messagebox, filedialog
 import webbrowser
 import tempfile
+import ctypes
+from ctypes import wintypes
 
 from server import FlaskServer
 from gui import MainWindow
@@ -37,12 +43,30 @@ class MyLocalAPIApp:
         
         # Setup logging
         setup_logging(os.path.join(self.app_data_dir, 'mylocalapi.log'))
+        # On Windows, set an explicit AppUserModelID so the OS uses our icon
+        # and groups windows properly in the taskbar (prevents generic Python icon)
+        try:
+            if sys.platform == 'win32':
+                try:
+                    APPID = 'com.aapaetsch.mylocalapi'
+                    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APPID)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         
     def create_tray_icon(self):
         """Create system tray icon"""
+        # Lazy import pystray and PIL to avoid import-time dependency
+        try:
+            import pystray
+            from PIL import Image, ImageDraw
+        except Exception:
+            pystray = None
+            Image = None
+            ImageDraw = None
+
         # Prefer bundled tray icon files when available (ICO for Windows).
-        # To avoid an extremely tiny icon on high-DPI systems, create an ICO
-        # that contains multiple sizes so Windows can pick the best one.
         base_dir = os.path.dirname(os.path.abspath(__file__))
         tray_ico = os.path.join(base_dir, 'MyLocalAPI_app_icon_new.ico')
         tray_png = os.path.join(base_dir, 'mylocalapiappicon.png')
@@ -50,15 +74,13 @@ class MyLocalAPIApp:
 
         image = None
         try:
-            # If there's a real ICO, prefer it (it may already contain multiple sizes)
-            if os.path.exists(tray_ico):
+            if Image is not None and os.path.exists(tray_ico):
                 try:
                     image = Image.open(tray_ico)
                 except Exception:
                     image = None
 
-            # If no ICO, try PNG sources and build a multi-size ICO in temp
-            if image is None:
+            if Image is not None and image is None:
                 source = None
                 for candidate in (tray_png, app_png):
                     if os.path.exists(candidate):
@@ -68,93 +90,65 @@ class MyLocalAPIApp:
                 if source:
                     try:
                         src_img = Image.open(source).convert('RGBA')
-                        # Create a multi-size ICO file so Windows will select an appropriate size
                         ico_sizes = [(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)]
                         tmp_ico_path = os.path.join(tempfile.gettempdir(), 'mylocalapi_tray_temp.ico')
                         try:
                             src_img.save(tmp_ico_path, format='ICO', sizes=ico_sizes)
                             image = Image.open(tmp_ico_path)
                         except Exception:
-                            # If ICO creation fails, fall back to a larger PNG resized
-                            image = src_img.resize((64,64), Image.LANCZOS)
+                            image = src_img.resize((16,16), Image.LANCZOS)
                     except Exception:
                         image = None
         except Exception:
             image = None
 
-        # Fallback: generate a simple icon if no image was loaded
-        if image is None:
-            image = Image.new('RGBA', (128, 128), color=(70, 130, 180, 255))
-            draw = ImageDraw.Draw(image)
-            draw.ellipse([32, 32, 96, 96], fill=(255, 255, 255, 255))
-            draw.text((44, 40), "M", fill=(0, 0, 128, 255))
+        if image is None and Image is not None:
+            try:
+                image = Image.new('RGBA', (128, 128), color=(70, 130, 180, 255))
+                draw = ImageDraw.Draw(image)
+                draw.ellipse([32, 32, 96, 96], fill=(255, 255, 255, 255))
+                draw.text((44, 40), "M", fill=(0, 0, 128, 255))
+            except Exception:
+                image = None
 
-        # Log what we will use for the tray icon (helpful for debugging tiny icons)
-        logger = logging.getLogger(__name__)
-        try:
-            logger.debug(f"Tray icon image size: {getattr(image, 'size', None)}; mode: {getattr(image, 'mode', None)}")
-        except Exception:
-            pass
+        # Create menu handlers and pystray icon if available
+        if pystray is None:
+            # pystray not available - skip creating a tray icon
+            self.tray_icon = None
+            return
 
-        # Many tray backends and Windows scale icons down if the provided image is very small
-        # or contains lots of transparent padding. Provide a reasonably large, square image
-        # for pystray to convert: 64x64 is a good compromise for most DPI settings.
-        try:
-            py_icon = image
-            if getattr(py_icon, 'size', (0, 0)) != (64, 64):
-                try:
-                    py_icon = image.resize((64, 64), Image.LANCZOS)
-                except Exception:
-                    py_icon = image.copy()
-        except Exception:
-            py_icon = image
-        
         def on_left_click(icon, item):
-            """Handle left click - show main window"""
             self.show_main_window()
-            
+
         def on_quit(icon, item):
-            """Handle quit action"""
             self.quit_application()
-            
+
         def on_start_server(icon, item):
-            """Handle start server action"""
             self.start_server()
-            
+
         def on_stop_server(icon, item):
-            """Handle stop server action"""
             self.stop_server()
-            
+
         def on_restart_server(icon, item):
-            """Handle restart server action"""
             self.restart_server()
-            
+
         def on_open_browser(icon, item):
-            """Handle open in browser action"""
             port = self.settings_manager.get_setting('port', 1482)
             webbrowser.open(f'http://127.0.0.1:{port}/')
-        
-        # Create menu items
+
         menu_items = [
             pystray.MenuItem('Open MyLocalAPI', on_open_browser),
             pystray.MenuItem('Settings...', on_left_click),
-            pystray.MenuItem(f'Port: {self.settings_manager.get_setting("port", 1482)}', 
-                           lambda: None, enabled=False),
-            pystray.MenuItem('Start', on_start_server, 
-                           enabled=lambda item: not self.is_server_running()),
-            pystray.MenuItem('Stop', on_stop_server,
-                           enabled=lambda item: self.is_server_running()),
-            pystray.MenuItem('Restart', on_restart_server,
-                           enabled=lambda item: self.is_server_running()),
+            pystray.MenuItem(f'Port: {self.settings_manager.get_setting("port", 1482)}', lambda: None, enabled=False),
+            pystray.MenuItem('Start', on_start_server, enabled=lambda item: not self.is_server_running()),
+            pystray.MenuItem('Stop', on_stop_server, enabled=lambda item: self.is_server_running()),
+            pystray.MenuItem('Restart', on_restart_server, enabled=lambda item: self.is_server_running()),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem('Quit', on_quit)
         ]
-        
-        self.tray_icon = pystray.Icon(
-            "MyLocalAPI",
-            image,
-            menu=pystray.Menu(*menu_items)
-        )
+
+        # If image is None, pystray will still accept a PIL Image or other acceptable formats
+        self.tray_icon = pystray.Icon("MyLocalAPI", image, menu=pystray.Menu(*menu_items))
         
     def update_tray_menu(self):
         """Update tray menu to reflect current state"""
@@ -182,6 +176,13 @@ class MyLocalAPIApp:
         def on_open_browser(icon, item):
             webbrowser.open(f'http://localhost:{port}/')
         
+        # Lazily import pystray so this function can run even if pystray
+        # isn't installed in the environment used for quick import checks.
+        try:
+            import pystray
+        except Exception:
+            return
+
         menu_items = [
             pystray.MenuItem('Open MyLocalAPI', on_open_browser),
             pystray.MenuItem('Settings...', on_left_click),
@@ -192,14 +193,27 @@ class MyLocalAPIApp:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem('Quit', on_quit)
         ]
-        
+
         self.tray_icon.menu = pystray.Menu(*menu_items)
         
     def show_main_window(self):
         """Show and focus the main window"""
         if not self.main_window:
-            root = tk.Tk()
+            # Create a CTk root for the application UI
+            if CTK_AVAILABLE:
+                root = ctk.CTk()
+                try:
+                    ctk.set_appearance_mode('dark')
+                    ctk.set_default_color_theme('dark-blue')
+                except Exception:
+                    pass
+            else:
+                # Fallback to native Tk if customtkinter is not available
+                root = tk.Tk()
+
             self.main_window = MainWindow(root, self)
+
+            # (Rounded-corner region code removed to avoid rendering/taskbar issues on Windows.)
             
         # Show and focus window
         self.main_window.root.deiconify()
@@ -211,6 +225,11 @@ class MyLocalAPIApp:
             if hasattr(self.main_window, '_ensure_taskbar_icon'):
                 # Schedule slightly after show to ensure the HWND is valid/mapped
                 self.main_window.root.after(50, lambda: self.main_window._ensure_taskbar_icon())
+                # Secondary attempt after a longer delay to increase reliability
+                try:
+                    self.main_window.root.after(500, lambda: self.main_window._ensure_taskbar_icon())
+                except Exception:
+                    pass
         except Exception:
             pass
         
