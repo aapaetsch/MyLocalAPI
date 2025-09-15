@@ -140,7 +140,7 @@ class MyLocalAPIApp:
 
         def on_open_browser(icon, item):
             port = self.settings_manager.get_setting('port', 1482)
-            webbrowser.open(f'http://127.0.0.1:{port}/')
+            webbrowser.open(f'http://localhost:{port}/')
 
         menu_items = [
             pystray.MenuItem('Open MyLocalAPI', on_open_browser),
@@ -249,12 +249,10 @@ class MyLocalAPIApp:
                 win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
                 win32gui.SetForegroundWindow(hwnd)
             except pywintypes.error:
-                # SetForegroundWindow can fail due to foreground-locking rules.
-                # Fallback: briefly set the window as topmost to bring it to front.
                 self.main_window.root.attributes('-topmost', True)
                 self.main_window.root.after(100, lambda: self.main_window.root.attributes('-topmost', False))
         except ImportError:
-            pass  # pywin32 not available
+            pass 
             
     def start_server(self):
         """Start the Flask server"""

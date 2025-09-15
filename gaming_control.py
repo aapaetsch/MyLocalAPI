@@ -29,10 +29,8 @@ class GamingController:
             if not steam_appid:
                 return {"ok": False, "error": "Steam App ID is required"}
             
-            # Steam URL protocol for launching games
             steam_url = f"steam://run/{steam_appid}"
             
-            # Use os.startfile on Windows or subprocess on other platforms
             if os.name == 'nt':
                 os.startfile(steam_url)
             else:
@@ -65,13 +63,10 @@ class GamingController:
             if not os.path.isfile(exe_path):
                 return {"ok": False, "error": f"Path is not a file: {exe_path}"}
             
-            # Launch the executable
             if os.name == 'nt':
-                # On Windows, use CREATE_NEW_PROCESS_GROUP to launch independently
                 subprocess.Popen([exe_path], 
                                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
             else:
-                # On other platforms, use standard Popen
                 subprocess.Popen([exe_path])
             
             logger.info(f"Launched game executable: {exe_path}")
@@ -92,7 +87,6 @@ class GamingController:
     def launch_game_by_label(self, label: str, mappings: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Launch a game by label using mappings"""
         try:
-            # Find matching mapping
             mapping = None
             for m in mappings:
                 if m.get('label', '').strip().lower() == label.strip().lower():
@@ -105,12 +99,10 @@ class GamingController:
                     "error": f"No game mapping found for label: {label}"
                 }
             
-            # Check what launch method to use
             steam_appid = mapping.get('steam_appid', '').strip()
             exe_path = mapping.get('exe_path', '').strip()
             
             if steam_appid:
-                # Launch via Steam
                 result = self.launch_game_by_steam_id(steam_appid)
                 if result["ok"]:
                     result["label"] = label
@@ -118,7 +110,6 @@ class GamingController:
                 return result
             
             elif exe_path:
-                # Launch via executable
                 result = self.launch_game_by_executable(exe_path)
                 if result["ok"]:
                     result["label"] = label
@@ -161,7 +152,6 @@ class GamingController:
                 "issues": []
             }
             
-            # Test Steam availability (check if Steam is installed)
             steam_paths = [
                 os.path.expanduser("~\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Steam\\Steam.lnk"),
                 "C:\\Program Files (x86)\\Steam\\steam.exe",

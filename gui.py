@@ -143,7 +143,6 @@ class MainWindow:
             # Prefer bundled ICOs when available (Windows)
             app_ico_path = os.path.join(base_dir, 'MyLocalAPI_app_icon_new.ico')
             tray_ico_path = os.path.join(base_dir, 'MyLocalAPI_tray_icon_new.ico')
-            # Expose for later use
             self._app_ico_path = app_ico_path
             self._tray_ico_path = tray_ico_path
 
@@ -151,7 +150,6 @@ class MainWindow:
             APP_ICON_SIZE = (32, 32)
             TRAY_ICON_SIZE = (64, 64)
 
-            # Try Pillow for high-quality resize
             try:
                 from PIL import Image, ImageTk
                 try:
@@ -171,7 +169,6 @@ class MainWindow:
                     self._tray_icon_img = ImageTk.PhotoImage(timg)
                 except Exception:
                     self._tray_icon_img = None
-                # On Windows, prefer bundled .ico files; otherwise create a temp .ico from the PNG
                 try:
                     if os.name == 'nt':
                         if os.path.exists(app_ico_path):
@@ -195,7 +192,6 @@ class MainWindow:
                 except Exception:
                     pass
             except Exception:
-                # Pillow not available - fall back to PhotoImage and subsample if needed
                 try:
                     tmp = tk.PhotoImage(file=icon_path)
                     iw = tmp.width()
@@ -227,10 +223,8 @@ class MainWindow:
                     self._tray_icon_img = tmp2
                 except Exception:
                     self._tray_icon_img = None
-                # If Pillow isn't available, try to set iconbitmap from provided .ico files
                 try:
                     if os.name == 'nt':
-                        # Prefer the bundled ICO names if present
                         for candidate in (app_ico_path, os.path.splitext(icon_path)[0] + '.ico'):
                             if os.path.exists(candidate):
                                 try:
@@ -244,16 +238,13 @@ class MainWindow:
         except Exception as e:
             logger.debug(f"Could not load icons: {e}")
         
-        # Handle window close
         self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
 
         # Schedule a deferred ensure of taskbar icon on Windows. Some backends
         # require the window to be mapped before window styles and WM_SETICON can be applied.
         try:
             if os.name == 'nt':
-                # run shortly after the main loop starts / window is created
                 self.root.after(100, lambda: self._ensure_taskbar_icon())
-                # Secondary attempt after a longer delay to handle slow window mapping
                 try:
                     self.root.after(500, lambda: self._ensure_taskbar_icon())
                 except Exception:
@@ -268,8 +259,6 @@ class MainWindow:
             if CTK_AVAILABLE:
                 try:
                     ctk.set_appearance_mode('dark')
-                    # Try to nudge CTk's theme; if a dict is accepted it will be used,
-                    # otherwise the call will be ignored.
                     try:
                         ctk.set_default_color_theme('dark-blue')
                     except Exception:
@@ -307,8 +296,6 @@ class MainWindow:
                 self.root.configure(bg=app_bg)
             except Exception:
                 pass
-
-            # No ttk styling needed when using CTk
 
             try:
                 if CTK_AVAILABLE:
@@ -355,7 +342,6 @@ class MainWindow:
             return
 
         try:
-            # original taskbar/icon handling continues here
             pass
         except Exception as e:
             logger.debug(f"_ensure_taskbar_icon failed: {e}")
@@ -383,7 +369,6 @@ class MainWindow:
         """Class-level enter handler for Buttons to show pointer cursor and hover style."""
         try:
             widget = event.widget
-            # If the widget is disabled, don't change cursor
             try:
                 is_disabled = False
                 try:
@@ -418,11 +403,9 @@ class MainWindow:
     def _create_custom_titlebar(self):
         """Create a custom titlebar to replace the native one."""
         try:
-            # Titlebar container (tall enough for a larger icon)
             titlebar = tk.Frame(self.root, bg=self._app_bg, height=32)
             titlebar.pack(fill=tk.X, side=tk.TOP)
 
-            # Left: app icon (if loaded)
             if getattr(self, '_app_icon', None):
                 icon_label = tk.Label(titlebar, image=self._app_icon, bg=self._app_bg)
                 icon_label.pack(side=tk.LEFT, padx=(6, 6), pady=2)
@@ -472,7 +455,6 @@ class MainWindow:
                 widget.bind('<ButtonRelease-1>', self._stop_move)
                 widget.bind('<B1-Motion>', self._on_move)
 
-            # Keep references so GC doesn't collect
             self._titlebar_widgets = {
                 'frame': titlebar,
                 'title': title_label,
@@ -499,7 +481,6 @@ class MainWindow:
                     except Exception:
                         prev[name] = ''
                     try:
-                        # Use a hand cursor during the drag to indicate a grab (not the move/cross icon)
                         w.configure(cursor='trek')
                     except Exception:
                         pass
@@ -511,7 +492,6 @@ class MainWindow:
             self._y_offset = 0
 
     def _stop_move(self, event):
-        # Restore previous cursors for titlebar widgets
         try:
             prev = getattr(self, '_titlebar_prev_cursors', None)
             widgets = getattr(self, '_titlebar_widgets', {})
@@ -556,16 +536,9 @@ class MainWindow:
         main_frame = ctk.CTkFrame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Server status section
         self._create_status_section(main_frame)
-
-        # Port and Token section
         self._create_connection_section(main_frame)
-
-        # Tabbed interface
         self._create_tabbed_interface(main_frame)
-
-        # Bottom controls
         self._create_bottom_controls(main_frame)
     
     def _create_status_section(self, parent):
@@ -573,7 +546,6 @@ class MainWindow:
         status_frame = ctk.CTkFrame(parent)
         status_frame.pack(fill=tk.X, pady=(0, 10))
 
-        # Status display
         status_display_frame = self._frame(status_frame)
         status_display_frame.pack(fill=tk.X, padx=10, pady=5)
 
@@ -637,7 +609,6 @@ class MainWindow:
     def _create_tabbed_interface(self, parent):
         """Create tabbed interface"""
         self.notebook = ctk.CTkTabview(parent)
-        # Pack notebook to fill available space; remove extra bottom padding so tab content reaches controls
         self.notebook.pack(fill=tk.BOTH, expand=True)
 
         self.notebook.add("Settings")
@@ -662,15 +633,12 @@ class MainWindow:
             elif getattr(event, 'num', None) == 5:
                 canvas.yview_scroll(1, 'units')
             else:
-                # Windows and macOS use event.delta
                 delta = getattr(event, 'delta', 0)
                 if delta:
-                    # On Windows, delta is multiple of 120. Positive = wheel up.
                     try:
                         step = int(delta / 120)
                     except Exception:
                         step = 1 if delta > 0 else -1
-                    # Invert sign so wheel-up scrolls up
                     canvas.yview_scroll(-step, 'units')
 
         def _bind_all(e=None):
@@ -701,19 +669,10 @@ class MainWindow:
         scrollable = ctk.CTkScrollableFrame(self.settings_frame)
         scrollable.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
-        # Audio section
         self._create_audio_section(scrollable)
-
-        # Fan section
         self._create_fan_section(scrollable)
-
-        # Streaming section
         self._create_streaming_section(scrollable)
-
-        # Gaming section
         self._create_gaming_section(scrollable)
-
-        # System section
         self._create_system_section(scrollable)
     
     def _create_audio_section(self, parent):
@@ -727,7 +686,6 @@ class MainWindow:
         # Section title (larger and underlined)
         title_font = ("TkDefaultFont", 14, "bold")
         ctk.CTkLabel(audio_frame, text="Audio", font=title_font, text_color=self._fg).pack(anchor=tk.W, padx=10, pady=(8, 2))
-        # Underline using a separator line
         sep = ctk.CTkFrame(audio_frame, fg_color=self._shade_color(self._input_bg, -10), height=2)
         sep.pack(fill=tk.X, padx=10, pady=(0, 8))
 
@@ -773,10 +731,8 @@ class MainWindow:
 
         self._label(self.mappings_table, text="Label").grid(row=0, column=0, sticky="w", padx=(10, 10))
         self._label(self.mappings_table, text="Device ID").grid(row=0, column=1, sticky="w", padx=(6, 10))
-        # Make these headers compact since switches are small - center headers above the small switches
         self._label(self.mappings_table, text="Stream", font=None).grid(row=0, column=2, sticky="w", padx=(10,0))
         self._label(self.mappings_table, text="Game", font=None).grid(row=0, column=3, sticky="w")
-        # Add button: green with plus icon and not too wide (use dark text for contrast)
         self._button(self.mappings_table, text="➕ Add", command=self._add_device_mapping, fg_color=self._success, text_color=self._app_bg, width=65, hover_color=self._accent_hover).grid(row=0, column=4, sticky="e", padx=(0,5), pady=(5,5))
 
         self.mappings_table.columnconfigure(1, weight=1)
@@ -785,7 +741,6 @@ class MainWindow:
     
     def _create_fan_section(self, parent):
         """Create fan control section"""
-        # Fan section card
         fan_frame = ctk.CTkFrame(parent, fg_color=self._shade_color(self._app_bg, 6), corner_radius=6)
         fan_frame.pack(fill=tk.X, padx=10, pady=8)
 
@@ -802,7 +757,6 @@ class MainWindow:
         # Fan exe path
         exe_frame = ctk.CTkFrame(fan_frame)
         exe_frame.pack(fill=tk.X, padx=10, pady=5)
-        # store reference so we can show/hide the entire block
         self.fan_exe_frame = exe_frame
 
         ctk.CTkLabel(exe_frame, text="FanControl.exe Path:").pack(anchor=tk.W, padx=(5,0))
@@ -817,7 +771,6 @@ class MainWindow:
         # Fan config path
         config_frame = ctk.CTkFrame(fan_frame)
         config_frame.pack(fill=tk.X, padx=10, pady=5)
-        # store reference so we can show/hide
         self.fan_config_frame = config_frame
 
         ctk.CTkLabel(config_frame, text="Fan Config Directory:").pack(anchor=tk.W, padx=(5,0))
@@ -853,7 +806,6 @@ class MainWindow:
             except Exception:
                 pass
 
-        # Create stream combo
         if hasattr(ctk, 'CTkComboBox'):
             try:
                 self.fan_stream_combo = ctk.CTkComboBox(stream_select_inner, state="readonly", values=[], command=_on_fan_config_stream_selected)
@@ -876,7 +828,6 @@ class MainWindow:
         self.fan_stream_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0,5))
         ctk.CTkButton(stream_select_inner, text="Refresh", command=self._refresh_fan_configs).pack(side=tk.RIGHT, padx=(0,5), pady=(0,5))
 
-        # Game apply switch, immediately followed by its selector row
         self.fan_apply_game_switch = ctk.CTkSwitch(apply_frame, text="Apply fan config on game launch", variable=self.fan_apply_game_var, command=self._on_fan_apply_game_changed)
         self.fan_apply_game_switch.pack(anchor=tk.W, padx=(5, 0), pady=(6,0))
 
@@ -916,21 +867,16 @@ class MainWindow:
     
     def _create_streaming_section(self, parent):
         """Create streaming section"""
-        # Streaming section card
-        # Streaming section
         streaming_frame = ctk.CTkFrame(parent, fg_color=self._shade_color(self._app_bg, 6), corner_radius=6)
         streaming_frame.pack(fill=tk.X, padx=10, pady=8)
         ctk.CTkLabel(streaming_frame, text="Streaming", font=("TkDefaultFont", 14, "bold"), text_color=self._fg).pack(anchor=tk.W, padx=10, pady=(8, 2))
         sep = ctk.CTkFrame(streaming_frame, fg_color=self._shade_color(self._input_bg, -10), height=2)
         sep.pack(fill=tk.X, padx=10, pady=(0, 8))
-
-        # Enable streaming endpoint (switch)
         ctk.CTkSwitch(streaming_frame, text="Launch streaming service by endpoint", variable=self.streaming_enabled_var, command=self._on_streaming_enabled_changed).pack(anchor=tk.W, padx=10, pady=5)
 
         # Apple TV moniker
         appletv_frame = ctk.CTkFrame(streaming_frame)
         appletv_frame.pack(fill=tk.X, padx=10, pady=5)
-        # Keep a reference so we can show/hide the entire moniker block
         self.appletv_frame = appletv_frame
         ctk.CTkLabel(appletv_frame, text="Apple TV App Moniker:").pack(anchor=tk.W, padx=(5,0))
         moniker_frame = ctk.CTkFrame(appletv_frame)
@@ -944,13 +890,11 @@ class MainWindow:
         # Gaming section card
         gaming_frame = ctk.CTkFrame(parent, fg_color=self._shade_color(self._app_bg, 6), corner_radius=6)
         gaming_frame.pack(fill=tk.X, padx=10, pady=8)
-        # Keep reference so we can show/hide inner settings when toggled
         self.gaming_frame = gaming_frame
 
         # Section title (larger and underlined)
         title_font = ("TkDefaultFont", 14, "bold")
         ctk.CTkLabel(gaming_frame, text="Gaming", font=title_font, text_color=self._fg).pack(anchor=tk.W, padx=10, pady=(8, 2))
-        # Underline using a separator line
         sep = ctk.CTkFrame(gaming_frame, fg_color=self._shade_color(self._input_bg, -10), height=2)
         sep.pack(fill=tk.X, padx=10, pady=(0, 8))
 
@@ -962,7 +906,6 @@ class MainWindow:
         card_bg = self._shade_color(self._input_bg, -6)
         gaming_mapping_card = ctk.CTkFrame(gaming_frame, fg_color=card_bg, corner_radius=8)
         gaming_mapping_card.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        # Keep reference to mappings card for hide/show
         self.gaming_mapping_card = gaming_mapping_card
 
         # Title for the game mapping card (larger title)
@@ -975,7 +918,6 @@ class MainWindow:
         self._label(self.gaming_mappings_table, text="Label").grid(row=0, column=0, sticky="w", padx=(10, 10))
         self._label(self.gaming_mappings_table, text="Steam App ID").grid(row=0, column=1, sticky="w", padx=(6, 10))
         self._label(self.gaming_mappings_table, text="Path to Exe").grid(row=0, column=2, sticky="w", padx=(6, 10))
-        # Add button: green with plus icon and not too wide (use dark text for contrast)
         self._button(self.gaming_mappings_table, text="➕ Add", command=self._add_gaming_mapping, fg_color=self._success, text_color=self._app_bg, width=65, hover_color=self._accent_hover).grid(row=0, column=3, sticky="e", padx=(0,5), pady=(5,5))
 
         self.gaming_mappings_table.columnconfigure(1, weight=1)
@@ -1037,15 +979,11 @@ class MainWindow:
 
             # Status dot to the left of the title
             status_indicator = ctk.CTkLabel(title_row, text="●", font=("TkDefaultFont", 14, "bold"), text_color=getattr(self, '_success', '#BBD760'))
-            # Add extra left padding so the indicator isn't flush to the card edge
             status_indicator.pack(side=tk.LEFT, padx=(10, 8))
-
             ctk.CTkLabel(title_row, text=group_info.get("group", ""), font=title_font, text_color=self._fg).pack(side=tk.LEFT, anchor='w')
-
             sep = ctk.CTkFrame(group_frame, fg_color=self._shade_color(self._input_bg, -10), height=2)
             sep.pack(fill=tk.X, padx=10, pady=(0, 8))
 
-            # Store for updating (indicator + endpoint frames)
             self.endpoint_widgets.append({
                 "group": group_info["group"],
                 "enabled_setting": group_info["enabled_setting"],
@@ -1055,11 +993,8 @@ class MainWindow:
             
             # Endpoints
             for endpoint in group_info["endpoints"]:
-                # Endpoint row card for visual separation
                 ep_frame = ctk.CTkFrame(group_frame, fg_color=self._shade_color(self._app_bg, 4), corner_radius=8)
-                # Increase left padding so endpoint cards align with group title indicator spacing
                 ep_frame.pack(fill=tk.X, padx=(24, 20), pady=(8, 10))
-                # Remember this endpoint frame so we can hide/show it when the group is toggled
                 self.endpoint_widgets[-1]["endpoints"].append(ep_frame)
 
                 # Create a left content area and a right actions column so buttons are stacked on the right
@@ -1069,12 +1004,9 @@ class MainWindow:
                 actions_container = ctk.CTkFrame(ep_frame)
                 actions_container.pack(side=tk.RIGHT, padx=(6, 10), anchor=tk.N)
 
-                # Endpoint info (larger text) goes into the content container
                 info_frame = ctk.CTkFrame(content_container)
                 info_frame.pack(fill=tk.X, padx=10, pady=4)
 
-                # Title row with enabled indicator on the left
-                # Determine enabled state for this group (used for per-endpoint indicator)
                 if group_info.get("enabled_setting") is None:
                     endpoint_enabled = True
                 else:
@@ -1085,7 +1017,6 @@ class MainWindow:
                 title_row.pack(anchor=tk.W, fill=tk.X)
 
                 ind = ctk.CTkLabel(title_row, text="●", font=("TkDefaultFont", 14, "bold"), text_color=dot_color)
-                # Add more left spacing for per-endpoint indicator
                 ind.pack(side=tk.LEFT, padx=(12, 8))
 
                 ctk.CTkLabel(title_row, text=f"{endpoint['method']} {endpoint['path']}", font=("TkDefaultFont", 12, "bold"), text_color=self._fg).pack(side=tk.LEFT)
@@ -1099,15 +1030,11 @@ class MainWindow:
                 curl_button = ctk.CTkButton(actions_container, text="Copy cURL", width=110, command=lambda ep=endpoint: self._copy_curl(ep))
                 curl_button.pack(pady=(0, 4), padx=(5,5))
 
-                # All endpoints share the same result textbox (created above)
                 endpoint["test_button"] = test_button
                 endpoint["result_text"] = self.endpoints_result_text
 
         self.endpoints_result_text.pack(fill=tk.X, padx=(10, 20), pady=(2, 0))
-        
-        
-    # If we used a CTkScrollableFrame, it's already packed by construction; nothing to do here
-    
+                    
     def _create_bottom_controls(self, parent):
         """Create bottom control buttons"""
         # Prefer CustomTkinter frames/buttons/labels when available;
@@ -1491,7 +1418,7 @@ class MainWindow:
             steam_appid = row_data["vars"]["steam_appid"].get().strip()
             exe_path = row_data["vars"]["exe_path"].get().strip()
             
-            if label or steam_appid or exe_path:  # Only save non-empty rows
+            if label or steam_appid or exe_path: 
                 mappings.append({
                     "label": label,
                     "steam_appid": steam_appid,
@@ -1514,8 +1441,7 @@ class MainWindow:
     
     def _on_streaming_checkbox_changed(self, changed_var):
         """Handle streaming checkbox change - ensure only one is selected"""
-        if changed_var.get():  # If this one was checked
-            # Uncheck all others
+        if changed_var.get(): 
             for row_data in self.mapping_rows:
                 streaming_var = row_data["vars"]["streaming"]
                 if streaming_var != changed_var:
@@ -1534,7 +1460,6 @@ class MainWindow:
                     self.app.update_tray_menu()
         except ValueError:
             pass
-        # Clear any prior validation when user types
         try:
             self._clear_field_error(self.port_entry, self.port_error_label)
         except Exception:
@@ -1543,7 +1468,6 @@ class MainWindow:
     def _on_token_changed(self, *args):
         """Handle token change"""
         self.settings_manager.set_setting('token', self.token_var.get())
-        # Clear any prior validation when user types
         try:
             self._clear_field_error(self.token_entry, self.token_error_label)
         except Exception:
@@ -1563,7 +1487,6 @@ class MainWindow:
         """Handle toggling whether to use a custom SoundVolumeView install"""
         enabled = self.use_custom_svv_var.get()
         self.settings_manager.set_setting('audio.use_custom_svv', enabled)
-        # Show or hide the SVV path frame based on both audio enabled and custom flag
         self._update_audio_ui_state()
     
     def _on_fan_enabled_changed(self):
@@ -1590,7 +1513,6 @@ class MainWindow:
         except Exception:
             pass
 
-        # Show/hide only the stream selector row
         try:
             if enabled:
                 try:
@@ -1617,7 +1539,6 @@ class MainWindow:
         except Exception:
             pass
 
-        # Show/hide only the game selector row
         try:
             if enabled:
                 try:
@@ -1671,13 +1592,11 @@ class MainWindow:
         """Update gaming UI state based on enabled setting"""
         enabled = self.gaming_enabled_var.get()
         
-        # Show or hide the gaming mappings card depending on gaming enabled state
         try:
             gaming_mapping_card = getattr(self, 'gaming_mapping_card', None)
             if gaming_mapping_card:
                 if enabled:
                     try:
-                        # Use the original pack options used during creation
                         gaming_mapping_card.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
                     except Exception:
                         pass
@@ -1689,7 +1608,6 @@ class MainWindow:
         except Exception:
             pass
 
-        # Enable/disable gaming-related widgets
         widgets = []
         for row in getattr(self, 'gaming_mapping_rows', []):
             widgets.extend(row["widgets"])
@@ -1699,8 +1617,8 @@ class MainWindow:
             try:
                 widget.configure(state=state)
             except tk.TclError:
-                pass  # Some widgets don't support state
-    
+                pass 
+
     def _on_apple_tv_moniker_changed(self, *args):
         """Handle Apple TV moniker change"""
         self.settings_manager.set_setting('streaming.appleTVMoniker', 
@@ -1712,7 +1630,6 @@ class MainWindow:
         self.settings_manager.set_setting('autostart', enabled)
         
         if enabled:
-            # Get executable path
             import sys
             exe_path = sys.executable if hasattr(sys, 'frozen') else __file__
             success = AutostartManager.enable(exe_path)
@@ -1728,13 +1645,11 @@ class MainWindow:
         """Update audio UI state based on enabled setting"""
         enabled = self.audio_enabled_var.get()
         
-        # Show or hide the SVV path frame depending on whether audio is enabled and the custom flag
         try:
             if enabled and getattr(self, 'use_custom_svv_var', None) and self.use_custom_svv_var.get():
                 try:
                     mapping_card = getattr(self, 'audio_mapping_card', None)
                     if mapping_card:
-                        # Insert the SVV frame before the mappings card so it stays in the original position
                         self.audio_svv_frame.pack(fill=tk.X, padx=10, pady=5, before=mapping_card)
                     else:
                         self.audio_svv_frame.pack(fill=tk.X, padx=10, pady=5)
@@ -1748,13 +1663,11 @@ class MainWindow:
         except Exception:
             pass
 
-        # Show or hide the device mappings card depending on audio enabled state
         try:
             mapping_card = getattr(self, 'audio_mapping_card', None)
             if mapping_card:
                 if enabled:
                     try:
-                        # Use the original pack options used during creation
                         mapping_card.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
                     except Exception:
                         pass
@@ -1766,7 +1679,6 @@ class MainWindow:
         except Exception:
             pass
 
-        # Enable/disable audio-related widgets
         widgets = [self.svv_entry] + [widget for row in self.mapping_rows for widget in row["widgets"]]
         
         state = "normal" if enabled else "disabled"
@@ -1774,7 +1686,7 @@ class MainWindow:
             try:
                 widget.configure(state=state)
             except tk.TclError:
-                pass  # Some widgets don't support state
+                pass 
     
     def _update_fan_ui_state(self):
         """Update fan UI state based on enabled setting"""
@@ -1789,7 +1701,6 @@ class MainWindow:
             except tk.TclError:
                 pass
 
-        # Show/hide the fan blocks depending on enabled
         try:
             if getattr(self, 'fan_exe_frame', None):
                 if enabled:
@@ -1820,10 +1731,8 @@ class MainWindow:
         except Exception:
             pass
 
-        # Handle fan apply UI and enable/disable the apply switch based on fan enabled state
         try:
             if enabled:
-                # Restore apply frame visibility if apply is set
                 if self.fan_apply_var.get() or self.fan_apply_game_var.get():
                     try:
                         self.fan_stream_config_frame.pack(fill=tk.X, pady=(5, 0))
@@ -1833,18 +1742,15 @@ class MainWindow:
                         self.fan_game_config_frame.pack(fill=tk.X, pady=(5, 0))
                     except Exception:
                         pass
-                # Ensure the apply switch is enabled
                 try:
                     self.fan_apply_switch.configure(state="normal")
                 except Exception:
                     pass
                 try:
-                    # Also enable the game-apply switch so both behave the same
                     self.fan_apply_game_switch.configure(state="normal")
                 except Exception:
                     pass
             else:
-                # When fan endpoints are disabled, force apply off and disable the switch
                 try:
                     self.fan_apply_var.set(False)
                     self.fan_apply_game_var.set(False)
@@ -2094,15 +2000,12 @@ class MainWindow:
         try:
             configs = self.settings_manager.parse_fan_configs() or []
 
-            # Try to update both stream and game combo widgets' values in a way that
-            # works for CTkComboBox and CTkOptionMenu across CTk versions.
             updated = False
             for combo_name in ('fan_stream_combo', 'fan_game_combo'):
                 combo = getattr(self, combo_name, None)
                 if combo is None:
                     continue
                 try:
-                    # Preferred: configure(values=...)
                     combo.configure(values=configs)
                     updated = True
                     continue
@@ -2115,9 +2018,7 @@ class MainWindow:
                 except Exception:
                     pass
 
-            # Select current config if set (try .set(), which works for both widgets)
             current = self.settings_manager.get_setting('fan.selected_config', '')
-            # Load current selections for stream and game selectors
             current_stream = self.settings_manager.get_setting('fan.selected_config_stream', '')
             current_game = self.settings_manager.get_setting('fan.selected_config_game', '')
             try:
@@ -2130,9 +2031,7 @@ class MainWindow:
                     elif configs:
                         try:
                             self.fan_stream_combo.set(configs[0])
-                            # persist default if none set
                             self.settings_manager.set_setting('fan.selected_config_stream', configs[0])
-                            # maintain legacy key for backward compatibility
                             try:
                                 self.settings_manager.set_setting('fan.selected_config', configs[0])
                             except Exception:
@@ -2154,12 +2053,9 @@ class MainWindow:
                         except Exception:
                             pass
             except Exception:
-                # If .set() isn't supported, ignore silently
                 pass
 
-            # Ensure the combo/menu is enabled for user interaction when configs exist
             try:
-                # Enable/disable both combos based on whether configs exist
                 if configs:
                     for combo in (getattr(self, 'fan_stream_combo', None), getattr(self, 'fan_game_combo', None)):
                         if combo is None:

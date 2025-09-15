@@ -79,13 +79,14 @@ class TestSettingsManager(unittest.TestCase):
         """Test settings validation"""
         # Valid settings should have no errors
         errors = self.settings.validate_settings()
-        self.assertIn("Token cannot be empty", errors)  # Default token is "changeme" which is valid
-        
+        # Default token is "changeme" and should not produce a 'Token cannot be empty' error
+        self.assertFalse(any("Token cannot be empty" in e for e in errors))
+
         # Test invalid port
         self.settings.set_setting('port', 99, save=False)  # Below minimum
         errors = self.settings.validate_settings()
         self.assertTrue(any("Port must be" in error for error in errors))
-        
+
         # Test empty token
         self.settings.set_setting('token', '', save=False)
         errors = self.settings.validate_settings()

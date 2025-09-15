@@ -80,26 +80,22 @@ class FanController:
         try:
             processes = self.get_fancontrol_processes()
             if not processes:
-                return True  # Already stopped
+                return True
             
-            # Try graceful shutdown first
             for proc in processes:
                 try:
                     if not force:
-                        # Try to close main window first
                         proc.terminate()
                         proc.wait(timeout=3)
                     else:
                         proc.kill()
                 except (psutil.NoSuchProcess, psutil.TimeoutExpired):
                     continue
-            
-            # Wait a bit and check if any are still running
+           
             time.sleep(0.5)
             remaining = self.get_fancontrol_processes()
             
             if remaining and not force:
-                # Force kill remaining processes
                 for proc in remaining:
                     try:
                         proc.kill()
@@ -108,7 +104,6 @@ class FanController:
                 
                 time.sleep(0.2)
             
-            # Final check using taskkill as fallback
             if self.get_fancontrol_processes():
                 safe_kill_process_by_name("FanControl.exe")
                 time.sleep(0.2)
@@ -128,24 +123,19 @@ class FanController:
             raise RuntimeError(f"FanControl.exe not found: {self.fan_exe_path}")
         
         try:
-            # Prepare arguments
             args = [self.fan_exe_path]
             if minimized:
                 args.append('-m')
             if config_path:
                 args.extend(['-c', config_path])
             
-            # Determine how to start based on current process privileges
             if is_admin():
-                # If we're admin, start unelevated for desktop interaction
                 logger.info("Starting FanControl unelevated from admin context")
                 self._start_unelevated(args)
             else:
-                # Normal start
                 subprocess.Popen(args, 
                                creationflags=subprocess.CREATE_NO_WINDOW if not minimized else 0)
             
-            # Wait a moment for process to start
             time.sleep(0.5)
             
             success = self.is_running()
@@ -169,7 +159,6 @@ class FanController:
             shell.ShellExecute(exe_path, exe_args, working_dir, 'open', 0)
             
         except ImportError:
-            # Fallback without pywin32
             subprocess.Popen(args)
         except Exception as e:
             logger.warning(f"Unelevated start failed, using normal start: {e}")
@@ -187,10 +176,7 @@ class FanController:
         if not os.path.exists(config_path):
             raise RuntimeError(f"Config file not found: {config_path}")
         
-        # Stop current instance
         self.stop_fancontrol()
-        
-        # Start with new config
         return self.start_fancontrol(minimized=True, config_path=config_path)
     
     def switch_config(self, config_path: str) -> bool:
@@ -199,11 +185,9 @@ class FanController:
             raise RuntimeError(f"Config file not found: {config_path}")
         
         try:
-            # Strategy 1: Config file replacement (works without elevation)
             if self.is_running():
                 return self._switch_config_by_replacement(config_path)
             else:
-                # If not running, start with config
                 return self.start_fancontrol(minimized=True, config_path=config_path)
                 
         except Exception as e:
@@ -213,7 +197,6 @@ class FanController:
     def _switch_config_by_replacement(self, config_path: str) -> bool:
         """Switch config by properly killing FanControl and restarting with new config"""
         try:
-            # Check if we have admin privileges for FanControl commands
             if not is_admin():
                 logger.error("Fan control switching requires administrator privileges to use FanControl.exe -e and -c commands")
                 logger.error("Please run MyLocalAPI as administrator to enable fan configuration switching")
@@ -227,7 +210,6 @@ class FanController:
                 logger.error(f"FanControl.exe not found: {exe_path}")
                 return False
             
-            # Step 1: Kill any running instances using -e flag
             logger.info("Stopping FanControl using -e command")
             try:
                 result = subprocess.run([exe_path, '-e'], 
@@ -246,10 +228,8 @@ class FanController:
             except Exception as e:
                 logger.warning(f"Failed to stop FanControl with -e: {e}")
             
-            # Wait for process to fully terminate
             time.sleep(1.0)
             
-            # Verify it's actually stopped
             max_wait = 5
             wait_count = 0
             while self.is_running() and wait_count < max_wait:
@@ -261,19 +241,15 @@ class FanController:
                 self.stop_fancontrol(force=True)
                 time.sleep(0.5)
             
-            # Step 2: Start FanControl with new config using -c flag
             logger.info(f"Starting FanControl with config: {config_path}")
             try:
-                # Start minimized with specific config
                 args = [exe_path, '-m', '-c', config_path]
                 
                 subprocess.Popen(args, creationflags=subprocess.CREATE_NO_WINDOW)
                 logger.info(f"Launched FanControl with: {' '.join(args)}")
                 
-                # Wait for process to start
                 time.sleep(1.5)
                 
-                # Verify it started
                 if self.is_running():
                     logger.info(f"Successfully switched to config: {os.path.basename(config_path)}")
                     return True
@@ -305,7 +281,6 @@ class FanController:
             
             exe_path = self.get_running_exe_path()
             if exe_path:
-                # Send refresh sensors command to running instance
                 try:
                     result = subprocess.run([exe_path, '-r'],
                                           capture_output=True,
@@ -347,7 +322,6 @@ class FanController:
                     if os.path.isfile(filepath):
                         config_name = os.path.splitext(filename)[0]
                         
-                        # Try to extract percentage from filename
                         percentage = None
                         import re
                         match = re.search(r'(\d{1,3})', config_name)
@@ -365,7 +339,6 @@ class FanController:
                             "modified": os.path.getmtime(filepath)
                         })
             
-            # Sort by percentage if available, then by name
             configs.sort(key=lambda x: (x["percentage"] is None, x["percentage"], x["name"]))
             return configs
             

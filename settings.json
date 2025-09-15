@@ -1,6 +1,6 @@
 {
   "port": 1482,
-  "host": "127.0.0.1",
+  "host": "0.0.0.0",
   "token": "your_secure_token_here",
   "audio": {
     "enabled": true,
@@ -32,7 +32,7 @@
   },
   "streaming": {
     "launch_streaming_by_endpoint": true,
-    "appleTVMoniker": "AppleInc.AppleTVWin_nzyj5cx40ttqa"
+    "appleTVMoniker": ""
   },
   "autostart": false
 }
