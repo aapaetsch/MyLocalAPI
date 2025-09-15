@@ -165,53 +165,18 @@ VSVersionInfo(
         """Create application icon"""
         print("🎨 Checking application icon...")
         
-        # Use existing icon if available
         existing_icon = self.project_root / 'MyLocalAPI_app_icon_new.ico'
         if existing_icon.exists():
             print("✓ Using existing application icon")
             return existing_icon
         
-        print("⚠️  Creating fallback icon...")
-        try:
-            from PIL import Image, ImageDraw
-            
-            # Create a simple icon
-            icon_size = (64, 64)
-            image = Image.new('RGBA', icon_size, (0, 0, 0, 0))  # Transparent background
-            draw = ImageDraw.Draw(image)
-            
-            # Draw a simple microphone/speaker icon
-            # Blue circle background
-            draw.ellipse([8, 8, 56, 56], fill=(0, 120, 215, 255), outline=(0, 90, 180, 255), width=2)
-            
-            # White "M" for MyLocalAPI  
-            try:
-                from PIL import ImageFont
-                font = ImageFont.load_default()
-                draw.text((32, 32), "M", fill=(255, 255, 255, 255), anchor="mm", font=font)
-            except:
-                # Fallback without font
-                draw.text((26, 22), "M", fill=(255, 255, 255, 255))
-            
-            # Save as ICO file
-            icon_path = self.project_root / 'icon.ico'
-            image.save(icon_path, format='ICO', sizes=[(16, 16), (32, 32), (48, 48), (64, 64)])
-            
-            print("✓ Fallback application icon created")
-            return icon_path
-            
-        except ImportError:
-            print("⚠️  Pillow not available for icon creation, using existing icon")
-            return existing_icon if existing_icon.exists() else None
-        except Exception as e:
-            print(f"⚠️  Could not create icon: {e}")
-            return existing_icon if existing_icon.exists() else None
+        print(f"⚠️  Could not create icon: {e}")
+        return existing_icon if existing_icon.exists() else None
     
     def build_executable(self, build_type='onefile'):
         """Build executable using PyInstaller"""
         print(f"🔨 Building executable ({build_type})...")
         
-        # Prepare PyInstaller arguments
         args = [
             'pyinstaller',
             '--clean',
@@ -223,14 +188,11 @@ VSVersionInfo(
         elif build_type == 'onedir':
             args.append('--onedir')
         
-        # Add console/windowed option
         args.append('--noconsole')  # No console window
         
-        # Add data files
         if self.scripts_dir.exists():
             args.extend(['--add-data', f'{self.scripts_dir};scripts'])
         
-        # Add icon if available
         icon_path = self.project_root / 'MyLocalAPI_app_icon_new.ico'
         if not icon_path.exists():
             icon_path = self.project_root / 'icon.ico'
@@ -238,12 +200,10 @@ VSVersionInfo(
         if icon_path.exists():
             args.extend(['--icon', str(icon_path)])
         
-        # Add version info if available
         version_file = self.project_root / 'version_info.py'
         if version_file.exists():
             args.extend(['--version-file', str(version_file)])
         
-        # Exclude unnecessary modules to reduce size
         excludes = [
             'matplotlib', 'numpy', 'scipy', 'pandas', 'jupyter',
             'notebook', 'IPython', 'test', 'tests', 'unittest',
@@ -253,7 +213,6 @@ VSVersionInfo(
         for exclude in excludes:
             args.extend(['--exclude-module', exclude])
         
-        # Hidden imports for modules PyInstaller might miss
         hidden_imports = [
             'win32gui', 'win32con', 'win32process', 'win32com.shell',
             'pystray._win32', 'PIL._tkinter_finder', 'psutil'
@@ -262,10 +221,8 @@ VSVersionInfo(
         for hidden in hidden_imports:
             args.extend(['--hidden-import', hidden])
         
-        # Main script
         args.append('main.py')
         
-        # Run PyInstaller
         try:
             print(f"Running: {' '.join(args)}")
             result = subprocess.run(args, check=True, capture_output=True, text=True)
@@ -287,24 +244,21 @@ VSVersionInfo(
             exe_path = self.dist_dir / 'MyLocalAPI.exe'
         elif (self.dist_dir / 'main.exe').exists():
             exe_path = self.dist_dir / 'main.exe'
-        elif (self.dist_dir / 'MyLocalAPI').exists():  # Directory distribution
+        elif (self.dist_dir / 'MyLocalAPI').exists(): 
             exe_path = self.dist_dir / 'MyLocalAPI'
         
         if not exe_path:
             print("❌ Could not find built executable")
             return False
         
-        # Create distribution directory
         package_dir = self.dist_dir / 'MyLocalAPI-Package'
         package_dir.mkdir(exist_ok=True)
         
-        # Copy executable
         if exe_path.is_file():
             shutil.copy2(exe_path, package_dir / 'MyLocalAPI.exe')
         else:
             shutil.copytree(exe_path, package_dir / 'MyLocalAPI', dirs_exist_ok=True)
         
-        # Copy documentation
         docs_to_copy = [
             ('README.md', 'README.md'),
             ('LICENSE', 'LICENSE.txt'),
@@ -368,31 +322,23 @@ Change the token in settings for security!
         print("🚀 Starting MyLocalAPI build process...")
         print("=" * 50)
         
-        # Step 1: Clean previous builds
         self.clean_build_dirs()
-        
-        # Step 2: Check dependencies
         if not self.check_dependencies():
             return False
         
-        # Step 3: Run tests (optional)
         if not skip_tests and not self.run_tests():
             print("❌ Build failed: Tests did not pass")
             return False
         
-        # Step 4: Download/check for svcl.exe
         if not self.download_svcl_exe():
             print("⚠️  Continuing without svcl.exe - audio features may not work")
         
-        # Step 5: Create version info and icon
         self.create_version_info()
         self.create_icon()
         
-        # Step 6: Build executable
         if not self.build_executable(build_type):
             return False
         
-        # Step 7: Create distribution package
         if not self.create_distribution_package():
             return False
         

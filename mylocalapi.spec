@@ -64,6 +64,7 @@ hiddenimports = [
     'win32com.shell.shell',
     'pywintypes',
     'pystray._win32',
+    'pickle',
     'PIL._tkinter_finder',
     'requests.packages.urllib3',
     'psutil',
