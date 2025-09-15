@@ -2,6 +2,11 @@
 """
 Manual QA Test Script for MyLocalAPI
 Tests basic functionality and API endpoints
+
+Author: Aidan Paetsch
+Date: 2025-09-15
+License: See LICENSE
+Disclaimer: Provided AS IS. See LICENSE for details.
 """
 
 import requests

@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
 Unit tests for MyLocalAPI core components
+
+Author: Aidan Paetsch
+Date: 2025-09-15
+License: See LICENSE
+Disclaimer: Provided AS IS. See LICENSE for details.
 """
 
 import unittest
