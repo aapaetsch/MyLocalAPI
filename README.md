@@ -1,14 +1,21 @@
-# MyLocalAPI
+# My MyLocalAPI
+
+Author: Aidan Paetsch
+Date: 2025-09-15
+License: See LICENSE (GNU GPL v3.0)
+Disclaimer: Provided AS IS. See README.md 'AS IS Disclaimer' for details.
 
 **MyLocalAPI** is a lightweight local HTTP server for Windows PC control. It provides REST endpoints for switching audio outputs, controlling volume, launching streaming services, and managing fan control profiles. The application features a system tray icon and a Tkinter GUI for configuration.
 
 ## Features
 
+- **Gaming Control**: Launch games with Steam AppID or executable path, apply fan profiles and audio switching
 - **Audio Control**: Switch default audio devices, set volume, query current device status
 - **Streaming Services**: Launch YouTube, Netflix, Disney+, Prime Video, Apple TV, and Crunchyroll
-- **Fan Control**: Integrate with FanControl.exe to manage fan profiles and speeds  
+- **Fan Control**: Integrate with FanControl.exe to manage fan profiles and speeds (requires admin)
 - **System Tray**: Runs quietly in system tray with right-click menu
 - **GUI Configuration**: Easy-to-use settings interface with device mapping
+- **Network Access**: Access from other devices on your local network
 - **Token Security**: API endpoints protected with configurable token
 - **Autostart**: Optional Windows startup integration
 
@@ -23,8 +30,9 @@
 
 #### Option 1: Pre-built Executable (Recommended)
 1. Download the latest `MyLocalAPI.exe` from releases
-2. Run the executable - it will create a system tray icon
-3. Right-click the tray icon and select "Settings..." to configure
+2. **For fan control**: Right-click and select "Run as administrator" 
+3. Run the executable - it will create a system tray icon
+4. Right-click the tray icon and select "Settings..." to configure
 
 #### Option 2: Development Setup
 ```bash
@@ -39,15 +47,60 @@ venv\Scripts\activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Run application
+# Run application (use run_as_admin.bat for fan control)
 python main.py
 ```
 
+### Administrator Privileges
+
+**Fan control functionality requires administrator privileges.**
+
+**🔄 NEW: Automatic Elevation**
+
+MyLocalAPI now automatically detects when administrator privileges are needed and prompts you to restart with elevated permissions:
+
+- **Automatic Detection**: When fan control is enabled, the app automatically checks if admin privileges are required
+- **User Prompt**: Shows a dialog asking if you want to restart with administrator privileges
+- **Seamless Restart**: The elevated instance starts automatically with your current settings
+
+**Manual Options:**
+
+- **Executable users**: Right-click `MyLocalAPI.exe` → "Run as administrator"
+- **Development users**: Use the provided `run_as_admin.bat` script
+- **Skip elevation**: Use `--no-elevation` flag to disable automatic elevation check
+- **Without admin**: Audio, gaming, and streaming features work normally (fan control disabled)
+
 ### Basic Configuration
 
-1. **Set Port and Token**: Configure in the GUI (default: port 1482, token "changeme")
-2. **Audio Mappings**: Add your audio devices with labels (e.g., "headphones", "speakers")
-3. **Start Server**: Click "Start" button in GUI or tray menu
+1. **Set Port and Token**: Configure in the GUI (default: port 5000, token "changeme")
+2. **Gaming Setup**: Add games with labels, Steam AppID, and executable paths
+3. **Audio Mappings**: Add your audio devices with labels (e.g., "headphones", "speakers")  
+4. **Fan Control**: Set FanControl.exe path and configuration directory
+5. **Start Server**: Click "Start" button in GUI or tray menu
+
+### Network Access Setup
+
+MyLocalAPI can be accessed from other devices on your local network:
+
+1. **Find Your IP**: Run `ipconfig` in Command Prompt, note your IPv4 address
+2. **Configure Firewall**: Allow port 5000 through Windows Firewall (usually prompted automatically)
+3. **Test Access**: From another device, visit `http://YOUR_IP:5000/health`
+4. **Mobile Integration**: Use HTTP request apps to create shortcuts for common actions
+
+See `NETWORK_SETUP.md` for detailed network configuration instructions.
+
+## API Usage
+
+### Quick Examples
+
+```bash
+# Health check
+curl "http://127.0.0.1:5000/health"
+
+# Launch a game 
+curl -X POST "http://127.0.0.1:5000/gaming/launch?token=changeme" \
+  -H "Content-Type: application/json" \
+  -d '{"game_id": "steam_game_1"}'
 
 ### API Usage
 
@@ -55,16 +108,23 @@ Once started, the server provides REST endpoints:
 
 ```bash
 # Switch to headphones
-curl "http://127.0.0.1:1482/switch?key=headphones&token=changeme"
+curl "http://127.0.0.1:5000/audio/set_default?token=changeme" \
+  -H "Content-Type: application/json" \
+  -d '{"device_name": "Headphones"}'
 
 # Set volume to 50%
-curl "http://127.0.0.1:1482/volume?percent=50&token=changeme"
+curl "http://127.0.0.1:5000/audio/volume?percent=50&token=changeme"
 
 # Get current device and volume
-curl "http://127.0.0.1:1482/device/current?token=changeme"
+curl "http://127.0.0.1:5000/audio/current?token=changeme"
 
-# Launch YouTube (switches to streaming device if configured)
-curl "http://127.0.0.1:1482/openStreaming?service=youtube&token=changeme"
+# Launch streaming service (switches to streaming device if configured)
+curl "http://127.0.0.1:5000/streaming/launch?service=youtube&token=changeme"
+
+# Apply fan profile
+curl -X POST "http://127.0.0.1:5000/fan/apply?token=changeme" \
+  -H "Content-Type: application/json" \
+  -d '{"profile": "gaming"}'
 ```
 
 ## Configuration
