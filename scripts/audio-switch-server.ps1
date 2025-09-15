@@ -25,8 +25,8 @@
 #>
 
 param(
-  [int]$Port = 8008,
-  [string]$Token ="SOMEPASSWORDHERRE",
+  [int]$Port = 182,
+  [string]$Token ="SOUNDSERVERPASSWORDWITHFRIENDS",
   [string]$SvvPath = $null,
 
   # --- Fan Control paths ---
