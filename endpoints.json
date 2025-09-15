@@ -54,6 +54,19 @@
     ]
   },
   {
+    "group": "Gaming",
+    "enabled_setting": "gaming.enabled",
+    "endpoints": [
+      {
+        "path": "/launchGame",
+        "method": "GET",
+        "params": "label=<game_label>&token=<token> OR steamid=<steam_app_id>&token=<token> OR path=<exe_path>&token=<token>",
+        "description": "Launch a game by label, Steam App ID, or executable path",
+        "test_params": "label=Example Game"
+      }
+    ]
+  },
+  {
     "group": "Fan Control",
     "enabled_setting": "fan.enabled",
     "endpoints": [
