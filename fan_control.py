@@ -2,6 +2,11 @@
 """
 Fan control integration using FanControl.exe
 Manages fan profiles, configurations, and process lifecycle
+
+Author: Aidan Paetsch
+Date: 2025-09-15
+License: See LICENSE (GNU GPL v3.0)
+Disclaimer: Provided AS IS. See README.md 'AS IS Disclaimer' for details.
 """
 
 import os
@@ -32,6 +37,14 @@ class FanController:
         """Check if fan control is properly configured"""
         return (bool(self.fan_exe_path and os.path.exists(self.fan_exe_path)) and
                 bool(self.fan_config_path and os.path.exists(self.fan_config_path)))
+    
+    def requires_admin(self) -> bool:
+        """Check if fan control requires admin privileges"""
+        return True  # FanControl.exe -e and -c commands require elevation
+    
+    def can_switch_configs(self) -> bool:
+        """Check if config switching is available (requires admin privileges)"""
+        return self.is_configured() and is_admin()
     
     def get_fancontrol_processes(self) -> List[psutil.Process]:
         """Get all running FanControl processes"""
@@ -181,45 +194,140 @@ class FanController:
         return self.start_fancontrol(minimized=True, config_path=config_path)
     
     def switch_config(self, config_path: str) -> bool:
-        """Switch to a different config (uses running instance if available)"""
+        """Switch to a different config (uses config file replacement strategy)"""
         if not os.path.exists(config_path):
             raise RuntimeError(f"Config file not found: {config_path}")
         
         try:
-            # If not running, start with config
-            if not self.is_running():
-                return self.start_fancontrol(minimized=True, config_path=config_path)
-            
-            # If running, send config change command to existing instance
-            exe_path = self.get_running_exe_path()
-            if exe_path:
-                # FanControl supports single-instance, so starting with -c should switch config
-                subprocess.Popen([exe_path, '-c', config_path],
-                               creationflags=subprocess.CREATE_NO_WINDOW)
-                time.sleep(0.2)
-                return True
+            # Strategy 1: Config file replacement (works without elevation)
+            if self.is_running():
+                return self._switch_config_by_replacement(config_path)
             else:
-                # Fallback to restart
-                return self.restart_with_config(config_path)
+                # If not running, start with config
+                return self.start_fancontrol(minimized=True, config_path=config_path)
                 
         except Exception as e:
             logger.error(f"Error switching config: {e}")
             return False
     
+    def _switch_config_by_replacement(self, config_path: str) -> bool:
+        """Switch config by properly killing FanControl and restarting with new config"""
+        try:
+            # Check if we have admin privileges for FanControl commands
+            if not is_admin():
+                logger.error("Fan control switching requires administrator privileges to use FanControl.exe -e and -c commands")
+                logger.error("Please run MyLocalAPI as administrator to enable fan configuration switching")
+                return False
+            
+            exe_path = self.get_running_exe_path()
+            if not exe_path:
+                exe_path = self.fan_exe_path
+            
+            if not exe_path or not os.path.exists(exe_path):
+                logger.error(f"FanControl.exe not found: {exe_path}")
+                return False
+            
+            # Step 1: Kill any running instances using -e flag
+            logger.info("Stopping FanControl using -e command")
+            try:
+                result = subprocess.run([exe_path, '-e'], 
+                                      capture_output=True, 
+                                      text=True, 
+                                      timeout=10,
+                                      creationflags=subprocess.CREATE_NO_WINDOW)
+                
+                if result.returncode != 0:
+                    logger.warning(f"FanControl -e returned code {result.returncode}: {result.stderr}")
+                else:
+                    logger.info("FanControl stopped successfully with -e")
+                    
+            except subprocess.TimeoutExpired:
+                logger.warning("FanControl -e command timed out")
+            except Exception as e:
+                logger.warning(f"Failed to stop FanControl with -e: {e}")
+            
+            # Wait for process to fully terminate
+            time.sleep(1.0)
+            
+            # Verify it's actually stopped
+            max_wait = 5
+            wait_count = 0
+            while self.is_running() and wait_count < max_wait:
+                time.sleep(0.5)
+                wait_count += 1
+            
+            if self.is_running():
+                logger.warning("FanControl still running after -e command, forcing termination")
+                self.stop_fancontrol(force=True)
+                time.sleep(0.5)
+            
+            # Step 2: Start FanControl with new config using -c flag
+            logger.info(f"Starting FanControl with config: {config_path}")
+            try:
+                # Start minimized with specific config
+                args = [exe_path, '-m', '-c', config_path]
+                
+                subprocess.Popen(args, creationflags=subprocess.CREATE_NO_WINDOW)
+                logger.info(f"Launched FanControl with: {' '.join(args)}")
+                
+                # Wait for process to start
+                time.sleep(1.5)
+                
+                # Verify it started
+                if self.is_running():
+                    logger.info(f"Successfully switched to config: {os.path.basename(config_path)}")
+                    return True
+                else:
+                    logger.error("FanControl failed to start with new config")
+                    return False
+                    
+            except Exception as e:
+                logger.error(f"Failed to start FanControl with config: {e}")
+                
+                # Try to restart with previous method as fallback
+                try:
+                    logger.info("Attempting fallback restart")
+                    self.start_fancontrol(minimized=True)
+                except:
+                    pass
+                    
+                return False
+            
+        except Exception as e:
+            logger.error(f"Config switch failed: {e}")
+            return False
+    
     def refresh_sensors(self) -> bool:
-        """Refresh FanControl sensors"""
+        """Refresh FanControl sensors using -r command"""
         try:
             if not self.ensure_running():
                 return False
             
             exe_path = self.get_running_exe_path()
             if exe_path:
-                # Send refresh command to running instance
-                subprocess.Popen([exe_path, '-r'],
-                               creationflags=subprocess.CREATE_NO_WINDOW)
-                logger.info("Sent refresh command to FanControl")
-                return True
+                # Send refresh sensors command to running instance
+                try:
+                    result = subprocess.run([exe_path, '-r'],
+                                          capture_output=True,
+                                          text=True,
+                                          timeout=5,
+                                          creationflags=subprocess.CREATE_NO_WINDOW)
+                    
+                    if result.returncode == 0:
+                        logger.info("Sent sensor refresh command to FanControl")
+                        return True
+                    else:
+                        logger.warning(f"Sensor refresh returned code {result.returncode}: {result.stderr}")
+                        return False
+                        
+                except subprocess.TimeoutExpired:
+                    logger.warning("Sensor refresh command timed out")
+                    return False
+                except Exception as e:
+                    logger.error(f"Error sending sensor refresh: {e}")
+                    return False
             else:
+                logger.error("Could not find running FanControl executable path")
                 return False
                 
         except Exception as e:

@@ -2,6 +2,11 @@
 """
 Network Discovery Tool for MyLocalAPI
 Helps find MyLocalAPI servers on the local network
+
+Author: Aidan Paetsch
+Date: 2025-09-15
+License: See LICENSE
+Disclaimer: Provided AS IS. See LICENSE for details.
 """
 
 import socket

@@ -2,6 +2,11 @@
 """
 Streaming services integration
 Handles launching streaming services and managing browser/app focus
+
+Author: Aidan Paetsch
+Date: 2025-09-15
+License: See LICENSE (GNU GPL v3.0)
+Disclaimer: Provided AS IS. See README.md 'AS IS Disclaimer' for details.
 """
 
 import os

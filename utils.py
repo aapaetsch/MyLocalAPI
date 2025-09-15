@@ -2,6 +2,11 @@
 """
 Utility functions for MyLocalAPI
 Common helpers for file operations, Windows integration, etc.
+
+Author: Aidan Paetsch
+Date: 2025-09-15
+License: See LICENSE (GNU GPL v3.0)
+Disclaimer: Provided AS IS. See README.md 'AS IS Disclaimer' for details.
 """
 
 import os
@@ -11,7 +16,7 @@ import socket
 import subprocess
 import winreg
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 
 def get_app_data_dir() -> str:
     """Get application data directory"""
@@ -48,6 +53,142 @@ def is_admin() -> bool:
         import ctypes
         return ctypes.windll.shell32.IsUserAnAdmin()
     except Exception:
+        return False
+
+def request_admin_privileges(script_path: Optional[str] = None, args: Optional[List[str]] = None) -> bool:
+    """
+    Request administrator privileges and restart the application
+    Returns True if elevation was requested, False if already admin or error
+    """
+    if is_admin():
+        return False  # Already running as admin
+    
+    try:
+        import ctypes
+        
+        # Determine the script/executable to run
+        if script_path is None:
+            if getattr(sys, 'frozen', False):
+                # Running as compiled executable
+                script_path = sys.executable
+            else:
+                # Running as Python script
+                script_path = sys.argv[0]
+        
+        # Prepare arguments
+        if args is None:
+            args = sys.argv[1:]  # Use current command line args
+        
+        # Add a flag to indicate this is an elevated restart
+        if '--elevated' not in args:
+            args = ['--elevated'] + args
+        
+        if getattr(sys, 'frozen', False):
+            # For compiled executable, run directly
+            ctypes.windll.shell32.ShellExecuteW(
+                None, 
+                "runas", 
+                script_path, 
+                ' '.join(args) if args else None,
+                None, 
+                1  # SW_NORMAL
+            )
+        else:
+            # For Python script, run with Python interpreter
+            python_exe = sys.executable
+            script_args = [script_path] + args
+            
+            ctypes.windll.shell32.ShellExecuteW(
+                None,
+                "runas", 
+                python_exe,
+                ' '.join(f'"{arg}"' for arg in script_args),
+                None,
+                1  # SW_NORMAL
+            )
+        
+        logging.info("Requested administrator privileges, application should restart elevated")
+        return True
+        
+    except Exception as e:
+        logging.error(f"Failed to request admin privileges: {e}")
+        return False
+
+def check_and_elevate(force: bool = False, show_prompt: bool = True) -> bool:
+    """
+    Check if admin privileges are needed and elevate if necessary
+    
+    Args:
+        force: Force elevation regardless of need
+        show_prompt: Show user prompt before elevating
+    
+    Returns:
+        True if elevation was requested (app should exit)
+        False if no elevation needed or user declined
+    """
+    # Check if we're already elevated or if this is an elevated restart
+    if is_admin() or '--elevated' in sys.argv:
+        return False
+    
+    # Check if admin privileges are actually needed
+    need_admin = force
+    
+    if not need_admin:
+        # Check if fan control is configured (requires admin)
+        try:
+            from settings import SettingsManager
+            settings = SettingsManager()
+            fan_enabled = settings.get_setting('fan.enabled', False)
+            fan_exe = settings.get_setting('fan.fan_exe_path', '')
+            
+            if fan_enabled and fan_exe and os.path.exists(fan_exe):
+                need_admin = True
+                logging.info("Fan control is configured and enabled - admin privileges recommended")
+        except Exception as e:
+            logging.debug(f"Could not check fan control settings: {e}")
+    
+    if not need_admin:
+        return False
+    
+    if show_prompt:
+        # Show prompt to user
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            
+            # Create a temporary root window for the messagebox
+            root = tk.Tk()
+            root.withdraw()  # Hide the root window
+            
+            message = (
+                "MyLocalAPI needs administrator privileges for full functionality:\n\n"
+                "• Fan control requires elevated permissions\n"
+                "• Some Windows APIs need admin access\n\n"
+                "Would you like to restart with administrator privileges?"
+            )
+            
+            response = messagebox.askyesno(
+                "Administrator Privileges Required",
+                message,
+                icon='question'
+            )
+            
+            root.destroy()
+            
+            if not response:
+                logging.info("User declined administrator privilege elevation")
+                return False
+                
+        except Exception as e:
+            logging.warning(f"Could not show elevation prompt: {e}")
+            # Continue with elevation attempt
+    
+    # Request elevation
+    if request_admin_privileges():
+        logging.info("Administrator privilege elevation requested - exiting current instance")
+        return True
+    else:
+        logging.warning("Failed to request administrator privileges")
         return False
 
 def find_available_port(start_port: int = 1482, max_attempts: int = 100) -> int:
@@ -294,6 +435,33 @@ def create_firewall_rule(port: int, rule_name: str = "MyLocalAPI", allow_network
         
     except Exception as e:
         logging.error(f"Failed to create firewall rule: {e}")
+        return False
+
+def remove_firewall_rule(rule_name: str = "MyLocalAPI", port: Optional[int] = None) -> bool:
+    """Remove Windows Firewall rule"""
+    if not sys.platform == 'win32':
+        return True  # Not applicable on non-Windows
+    
+    try:
+        if port:
+            # Remove rule by name and port for more precision
+            cmd = ['netsh', 'advfirewall', 'firewall', 'delete', 'rule', f'name={rule_name}', f'localport={port}']
+        else:
+            # Remove all rules with this name
+            cmd = ['netsh', 'advfirewall', 'firewall', 'delete', 'rule', f'name={rule_name}']
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        success = result.returncode == 0
+        
+        if success:
+            logging.info(f"Successfully removed firewall rule: {rule_name}")
+        else:
+            logging.debug(f"Firewall rule {rule_name} may not have existed")
+        
+        return success
+        
+    except Exception as e:
+        logging.error(f"Failed to remove firewall rule: {e}")
         return False
 
 def get_local_network_ip() -> Optional[str]:

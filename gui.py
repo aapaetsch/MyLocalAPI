@@ -2,6 +2,11 @@
 """
 Tkinter GUI for MyLocalAPI
 Main window with settings management and server control
+
+Author: Aidan Paetsch
+Date: 2025-09-15
+License: MIT (see LICENSE)
+Disclaimer: Use at your own risk. See LICENSE for details.
 """
 
 import os
@@ -70,8 +75,14 @@ class MainWindow:
         self.fan_exe_var = tk.StringVar()
         self.fan_config_var = tk.StringVar()
         self.fan_apply_var = tk.BooleanVar()
+        # New: apply on game launch
+        self.fan_apply_game_var = tk.BooleanVar()
         self.streaming_enabled_var = tk.BooleanVar()
         self.apple_tv_moniker_var = tk.StringVar()
+        
+        # Gaming settings variables
+        self.gaming_enabled_var = tk.BooleanVar()
+        
         self.autostart_var = tk.BooleanVar()
         
         self._setup_window()
@@ -120,14 +131,9 @@ class MainWindow:
     def _setup_window(self):
         """Setup main window properties"""
         self.root.title("MyLocalAPI - Settings")
-        self.root.geometry("700x800")
-        self.root.minsize(600, 800)
+        self.root.geometry("700x900")
+        self.root.minsize(600, 900)
         self._apply_steel_blue_theme()
-
-        # Use the native OS title bar for stability (taskbar, Alt+Tab, window manager).
-        # Removing the native chrome with overrideredirect() caused rendering,
-        # taskbar and Alt+Tab issues on some Windows configurations, so we keep
-        # the native decorations and avoid overriding the window region.
 
         # Load icons (keep references on self to avoid GC) and ensure they're small
         try:
@@ -237,9 +243,6 @@ class MainWindow:
                     pass
         except Exception as e:
             logger.debug(f"Could not load icons: {e}")
-
-        # Do not create a custom titlebar — use the OS-provided chrome for correct
-        # taskbar, Alt+Tab, and compositor behavior.
         
         # Handle window close
         self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
@@ -257,10 +260,6 @@ class MainWindow:
                     pass
         except Exception:
             pass
-        
-        # Note: platform-specific window styling (rounded corners) is intentionally
-        # omitted here. If you want native rounded corners on Windows, we can add
-        # pywin32-based calls later behind a capability check.
     
     def _apply_steel_blue_theme(self):
         """Apply a steel-blue dark theme to the Tkinter/ttk UI"""
@@ -605,7 +604,7 @@ class MainWindow:
         port_frame = self._frame(conn_frame)
         port_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        self._label(port_frame, text="Port:").pack(side=tk.LEFT)
+        self._label(port_frame, text="Port:").pack(side=tk.LEFT, padx=(0, 15))
         port_entry = self._entry(port_frame, textvariable=self.port_var, width=80)
         port_entry.pack(side=tk.LEFT, padx=(5, 8))
 
@@ -638,7 +637,8 @@ class MainWindow:
     def _create_tabbed_interface(self, parent):
         """Create tabbed interface"""
         self.notebook = ctk.CTkTabview(parent)
-        self.notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        # Pack notebook to fill available space; remove extra bottom padding so tab content reaches controls
+        self.notebook.pack(fill=tk.BOTH, expand=True)
 
         self.notebook.add("Settings")
         self.notebook.add("Endpoints")
@@ -710,6 +710,9 @@ class MainWindow:
         # Streaming section
         self._create_streaming_section(scrollable)
 
+        # Gaming section
+        self._create_gaming_section(scrollable)
+
         # System section
         self._create_system_section(scrollable)
     
@@ -750,7 +753,7 @@ class MainWindow:
 
         self.svv_entry = self._entry(path_frame, textvariable=self.svv_path_var)
         self.svv_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 5))
-        self._button(path_frame, text="Browse", command=self._browse_svv_path).pack(side=tk.RIGHT, padx=(0,5))
+        self._button(path_frame, text="Browse", command=self._browse_svv_path).pack(side=tk.RIGHT, padx=(0,5), pady=(0,5))
 
         self._label(svv_frame, text="Optional: svcl.exe/SoundVolumeView will be bundled; only fill this to use a local installation.", text_color="gray", font=("TkDefaultFont", 12)).pack(anchor=tk.W, padx=(12,0),pady=(2, 0))
 
@@ -770,13 +773,13 @@ class MainWindow:
 
         self._label(self.mappings_table, text="Label").grid(row=0, column=0, sticky="w", padx=(10, 10))
         self._label(self.mappings_table, text="Device ID").grid(row=0, column=1, sticky="w", padx=(6, 10))
-        self._label(self.mappings_table, text="Stream", font=None).grid(row=0, column=2, sticky="ew", padx=(0, 10))
+        # Make these headers compact since switches are small - center headers above the small switches
+        self._label(self.mappings_table, text="Stream", font=None).grid(row=0, column=2, sticky="w", padx=(10,0))
+        self._label(self.mappings_table, text="Game", font=None).grid(row=0, column=3, sticky="w")
         # Add button: green with plus icon and not too wide (use dark text for contrast)
-        self._button(self.mappings_table, text="➕ Add", command=self._add_device_mapping, fg_color=self._success, text_color=self._app_bg, width=60, hover_color=self._accent_hover).grid(row=0, column=3, sticky="e")
+        self._button(self.mappings_table, text="➕ Add", command=self._add_device_mapping, fg_color=self._success, text_color=self._app_bg, width=65, hover_color=self._accent_hover).grid(row=0, column=4, sticky="e", padx=(0,5), pady=(5,5))
 
         self.mappings_table.columnconfigure(1, weight=1)
-        # Give the streaming column a minimum width so the checkbox can be centered
-        self.mappings_table.columnconfigure(2, minsize=30)
 
         self.mapping_rows = []
     
@@ -808,7 +811,7 @@ class MainWindow:
 
         self.fan_exe_entry = ctk.CTkEntry(exe_path_frame, textvariable=self.fan_exe_var)
         self.fan_exe_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        ctk.CTkButton(exe_path_frame, text="Browse", command=self._browse_fan_exe).pack(side=tk.RIGHT, padx=(0,5))
+        ctk.CTkButton(exe_path_frame, text="Browse", command=self._browse_fan_exe).pack(side=tk.RIGHT, padx=(0,5), pady=(0,5))
 
 
         # Fan config path
@@ -824,29 +827,92 @@ class MainWindow:
         # Fan config entry
         self.fan_config_entry = ctk.CTkEntry(config_path_frame, textvariable=self.fan_config_var)
         self.fan_config_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        ctk.CTkButton(config_path_frame, text="Browse", command=self._browse_fan_config).pack(side=tk.RIGHT, padx=(0,5))
+        ctk.CTkButton(config_path_frame, text="Browse", command=self._browse_fan_config).pack(side=tk.RIGHT, padx=(0,5), pady=(0,5))
 
         # Apply on stream launch
         apply_frame = ctk.CTkFrame(fan_frame)
         apply_frame.pack(fill=tk.X, padx=10, pady=5)
         self.fan_apply_frame = apply_frame
 
+        # Stream apply switch, immediately followed by its selector row
         self.fan_apply_switch = ctk.CTkSwitch(apply_frame, text="Apply fan config on stream launch", variable=self.fan_apply_var, command=self._on_fan_apply_changed)
         self.fan_apply_switch.pack(anchor=tk.W, padx=(5, 0))
 
-        # Config selection dropdown (shown when apply is enabled)
-        self.fan_config_select_frame = ctk.CTkFrame(apply_frame)
-        ctk.CTkLabel(self.fan_config_select_frame, text="Selected Config:").pack(anchor=tk.W, pady=(5, 2), padx=(5,0))
-        config_select_frame = ctk.CTkFrame(self.fan_config_select_frame)
-        config_select_frame.pack(fill=tk.X, padx=(10,0))
+        self.fan_stream_config_frame = ctk.CTkFrame(apply_frame)
+        ctk.CTkLabel(self.fan_stream_config_frame, text="Selected Config (Stream):").pack(anchor=tk.W, pady=(5, 2), padx=(5,0))
+        stream_select_inner = ctk.CTkFrame(self.fan_stream_config_frame)
+        stream_select_inner.pack(fill=tk.X, padx=(10,0))
 
-        # CTk doesn't have a native Combobox in some versions; use OptionMenu/ComboBox when available
+        def _on_fan_config_stream_selected(val):
+            try:
+                self.settings_manager.set_setting('fan.selected_config_stream', val)
+                try:
+                    self.settings_manager.set_setting('fan.selected_config', val)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        # Create stream combo
         if hasattr(ctk, 'CTkComboBox'):
-            self.fan_config_combo = ctk.CTkComboBox(config_select_frame, state="readonly", values=[])
+            try:
+                self.fan_stream_combo = ctk.CTkComboBox(stream_select_inner, state="readonly", values=[], command=_on_fan_config_stream_selected)
+            except Exception:
+                self.fan_stream_combo = ctk.CTkComboBox(stream_select_inner, state="readonly", values=[])
+                try:
+                    self.fan_stream_combo.configure(command=_on_fan_config_stream_selected)
+                except Exception:
+                    pass
         else:
-            self.fan_config_combo = ctk.CTkOptionMenu(config_select_frame, values=[])
-        self.fan_config_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        ctk.CTkButton(config_select_frame, text="Refresh", command=self._refresh_fan_configs).pack(side=tk.RIGHT, padx=(0,5))
+            try:
+                self.fan_stream_combo = ctk.CTkOptionMenu(stream_select_inner, values=[], command=_on_fan_config_stream_selected)
+            except Exception:
+                self.fan_stream_combo = ctk.CTkOptionMenu(stream_select_inner, values=[])
+                try:
+                    self.fan_stream_combo.configure(command=_on_fan_config_stream_selected)
+                except Exception:
+                    pass
+
+        self.fan_stream_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0,5))
+        ctk.CTkButton(stream_select_inner, text="Refresh", command=self._refresh_fan_configs).pack(side=tk.RIGHT, padx=(0,5), pady=(0,5))
+
+        # Game apply switch, immediately followed by its selector row
+        self.fan_apply_game_switch = ctk.CTkSwitch(apply_frame, text="Apply fan config on game launch", variable=self.fan_apply_game_var, command=self._on_fan_apply_game_changed)
+        self.fan_apply_game_switch.pack(anchor=tk.W, padx=(5, 0), pady=(6,0))
+
+        self.fan_game_config_frame = ctk.CTkFrame(apply_frame)
+        ctk.CTkLabel(self.fan_game_config_frame, text="Selected Config (Game):").pack(anchor=tk.W, pady=(5, 2), padx=(5,0))
+        game_select_inner = ctk.CTkFrame(self.fan_game_config_frame)
+        game_select_inner.pack(fill=tk.X, padx=(10,0))
+
+        def _on_fan_config_game_selected(val):
+            try:
+                self.settings_manager.set_setting('fan.selected_config_game', val)
+            except Exception:
+                pass
+
+        # Create game combo
+        if hasattr(ctk, 'CTkComboBox'):
+            try:
+                self.fan_game_combo = ctk.CTkComboBox(game_select_inner, state="readonly", values=[], command=_on_fan_config_game_selected)
+            except Exception:
+                self.fan_game_combo = ctk.CTkComboBox(game_select_inner, state="readonly", values=[])
+                try:
+                    self.fan_game_combo.configure(command=_on_fan_config_game_selected)
+                except Exception:
+                    pass
+        else:
+            try:
+                self.fan_game_combo = ctk.CTkOptionMenu(game_select_inner, values=[], command=_on_fan_config_game_selected)
+            except Exception:
+                self.fan_game_combo = ctk.CTkOptionMenu(game_select_inner, values=[])
+                try:
+                    self.fan_game_combo.configure(command=_on_fan_config_game_selected)
+                except Exception:
+                    pass
+
+        self.fan_game_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0,5))
+        ctk.CTkButton(game_select_inner, text="Refresh", command=self._refresh_fan_configs).pack(side=tk.RIGHT, padx=(0,5), pady=(0,5))
     
     def _create_streaming_section(self, parent):
         """Create streaming section"""
@@ -871,7 +937,51 @@ class MainWindow:
         moniker_frame.pack(fill=tk.X, pady=(2, 0), padx=(10,0))
         self.appletv_entry = ctk.CTkEntry(moniker_frame, textvariable=self.apple_tv_moniker_var)
         self.appletv_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        ctk.CTkButton(moniker_frame, text="Auto-detect", command=self._auto_detect_appletv).pack(side=tk.RIGHT, padx=(0,5))
+        ctk.CTkButton(moniker_frame, text="Auto-detect", command=self._auto_detect_appletv).pack(side=tk.RIGHT, padx=(0,5), pady=(0,5))
+    
+    def _create_gaming_section(self, parent):
+        """Create gaming section"""
+        # Gaming section card
+        gaming_frame = ctk.CTkFrame(parent, fg_color=self._shade_color(self._app_bg, 6), corner_radius=6)
+        gaming_frame.pack(fill=tk.X, padx=10, pady=8)
+        # Keep reference so we can show/hide inner settings when toggled
+        self.gaming_frame = gaming_frame
+
+        # Section title (larger and underlined)
+        title_font = ("TkDefaultFont", 14, "bold")
+        ctk.CTkLabel(gaming_frame, text="Gaming", font=title_font, text_color=self._fg).pack(anchor=tk.W, padx=10, pady=(8, 2))
+        # Underline using a separator line
+        sep = ctk.CTkFrame(gaming_frame, fg_color=self._shade_color(self._input_bg, -10), height=2)
+        sep.pack(fill=tk.X, padx=10, pady=(0, 8))
+
+        # Enable switch
+        self.gaming_enable_switch = self._switch(gaming_frame, text="Enable gaming launch endpoints", variable=self.gaming_enabled_var, command=self._on_gaming_enabled_changed)
+        self.gaming_enable_switch.pack(anchor=tk.W, padx=10, pady=5)
+
+        # Gaming mappings - put into a card with rounded corners and slightly darker background
+        card_bg = self._shade_color(self._input_bg, -6)
+        gaming_mapping_card = ctk.CTkFrame(gaming_frame, fg_color=card_bg, corner_radius=8)
+        gaming_mapping_card.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        # Keep reference to mappings card for hide/show
+        self.gaming_mapping_card = gaming_mapping_card
+
+        # Title for the game mapping card (larger title)
+        ctk.CTkLabel(gaming_mapping_card, text="Game Mappings", font=("TkDefaultFont", 12, "bold"), text_color=self._fg).pack(anchor=tk.W, padx=10, pady=(8, 2))
+
+        # Gaming mappings table (single grid so headers align with inputs/dropdowns)
+        self.gaming_mappings_table = self._frame(gaming_mapping_card)
+        self.gaming_mappings_table.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
+
+        self._label(self.gaming_mappings_table, text="Label").grid(row=0, column=0, sticky="w", padx=(10, 10))
+        self._label(self.gaming_mappings_table, text="Steam App ID").grid(row=0, column=1, sticky="w", padx=(6, 10))
+        self._label(self.gaming_mappings_table, text="Path to Exe").grid(row=0, column=2, sticky="w", padx=(6, 10))
+        # Add button: green with plus icon and not too wide (use dark text for contrast)
+        self._button(self.gaming_mappings_table, text="➕ Add", command=self._add_gaming_mapping, fg_color=self._success, text_color=self._app_bg, width=65, hover_color=self._accent_hover).grid(row=0, column=3, sticky="e", padx=(0,5), pady=(5,5))
+
+        self.gaming_mappings_table.columnconfigure(1, weight=1)
+        self.gaming_mappings_table.columnconfigure(2, weight=1)
+
+        self.gaming_mapping_rows = []
     
     def _create_system_section(self, parent):
         """Create system section"""
@@ -895,8 +1005,7 @@ class MainWindow:
         ctk.CTkButton(settings_frame, text="Import Settings", command=self._import_settings).pack(side=tk.LEFT)
     
     def _create_endpoints_tab(self):
-        """Create endpoints tab content"""
-        # Create a CTkScrollableFrame for endpoints
+        self.endpoints_result_text = ctk.CTkTextbox(self.endpoints_frame, width=1, height=120)
         endpoints_container = ctk.CTkScrollableFrame(self.endpoints_frame)
         endpoints_container.pack(fill=tk.BOTH, expand=True)
 
@@ -918,7 +1027,7 @@ class MainWindow:
 
         for group_info in endpoints:
             # Create a bordered card container for the group
-            group_frame = ctk.CTkFrame(endpoints_container, fg_color=self._shade_color(self._app_bg, 6), corner_radius=6)
+            group_frame = ctk.CTkFrame(endpoints_container, fg_color=self._shade_color(self._app_bg, 6), corner_radius=6, height=200)
             group_frame.pack(fill=tk.X, padx=5, pady=(14, 10))
 
             # Group title with status indicator on the left: larger, bold and underlined
@@ -953,9 +1062,16 @@ class MainWindow:
                 # Remember this endpoint frame so we can hide/show it when the group is toggled
                 self.endpoint_widgets[-1]["endpoints"].append(ep_frame)
 
-                # Endpoint info (larger text)
-                info_frame = ctk.CTkFrame(ep_frame)
-                info_frame.pack(fill=tk.X, padx=10, pady=8)
+                # Create a left content area and a right actions column so buttons are stacked on the right
+                content_container = ctk.CTkFrame(ep_frame)
+                content_container.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+                actions_container = ctk.CTkFrame(ep_frame)
+                actions_container.pack(side=tk.RIGHT, padx=(6, 10), anchor=tk.N)
+
+                # Endpoint info (larger text) goes into the content container
+                info_frame = ctk.CTkFrame(content_container)
+                info_frame.pack(fill=tk.X, padx=10, pady=4)
 
                 # Title row with enabled indicator on the left
                 # Determine enabled state for this group (used for per-endpoint indicator)
@@ -977,20 +1093,18 @@ class MainWindow:
                 if endpoint["params"]:
                     ctk.CTkLabel(info_frame, text=f"Parameters: {endpoint['params']}", font=("TkDefaultFont", 11), text_color=self._muted).pack(anchor=tk.W, padx=(5, 0))
 
-                # Test button and result
-                test_frame = ctk.CTkFrame(ep_frame)
-                test_frame.pack(fill=tk.X, pady=(2, 5))
+                # Create stacked action buttons in the right actions column
+                test_button = ctk.CTkButton(actions_container, text="Test", width=110, command=lambda ep=endpoint: self._test_endpoint(ep), fg_color=self._accent, text_color=self._app_bg)
+                test_button.pack(pady=(4, 6), padx=(5,5))
+                curl_button = ctk.CTkButton(actions_container, text="Copy cURL", width=110, command=lambda ep=endpoint: self._copy_curl(ep))
+                curl_button.pack(pady=(0, 4), padx=(5,5))
 
-                test_button = ctk.CTkButton(test_frame, text="Test", width=90, command=lambda ep=endpoint: self._test_endpoint(ep), fg_color=self._accent, text_color=self._app_bg)
-                curl_button = ctk.CTkButton(test_frame, text="Copy cURL", width=110, command=lambda ep=endpoint: self._copy_curl(ep))
-                test_button.pack(side=tk.LEFT, padx=(5, 8), pady=4)
-                curl_button.pack(side=tk.LEFT, padx=(0, 8), pady=4)
-                # Use CTkTextbox for results
-                result_text = ctk.CTkTextbox(test_frame, width=1, height=2)
-                result_text.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=4)
-
+                # All endpoints share the same result textbox (created above)
                 endpoint["test_button"] = test_button
-                endpoint["result_text"] = result_text
+                endpoint["result_text"] = self.endpoints_result_text
+
+        self.endpoints_result_text.pack(fill=tk.X, padx=(10, 20), pady=(2, 0))
+        
         
     # If we used a CTkScrollableFrame, it's already packed by construction; nothing to do here
     
@@ -998,7 +1112,7 @@ class MainWindow:
         """Create bottom control buttons"""
         # Prefer CustomTkinter frames/buttons/labels when available;
         bottom_frame = ctk.CTkFrame(parent)
-        bottom_frame.pack(fill=tk.X, pady=(10, 0))
+        bottom_frame.pack(fill=tk.X, pady=(8, 0))
 
         # Status message (right side)
         self.status_message_var = tk.StringVar()
@@ -1032,10 +1146,23 @@ class MainWindow:
         self.fan_exe_var.set(self.settings_manager.get_setting('fan.fan_exe_path', ''))
         self.fan_config_var.set(self.settings_manager.get_setting('fan.fan_config_path', ''))
         self.fan_apply_var.set(self.settings_manager.get_setting('fan.apply_on_stream_launch', False))
+        # New: load apply on game launch setting
+        try:
+            self.fan_apply_game_var.set(self.settings_manager.get_setting('fan.apply_on_game_launch', False))
+        except Exception:
+            self.fan_apply_game_var.set(False)
+        # Refresh fan configs into dropdowns so selected_config values are visible
+        try:
+            self._refresh_fan_configs()
+        except Exception:
+            pass
         
         # Streaming settings
         self.streaming_enabled_var.set(self.settings_manager.get_setting('streaming.launch_streaming_by_endpoint', True))
         self.apple_tv_moniker_var.set(self.settings_manager.get_setting('streaming.appleTVMoniker', ''))
+        
+        # Gaming settings
+        self.gaming_enabled_var.set(self.settings_manager.get_setting('gaming.enabled', True))
         
         # System settings
         self.autostart_var.set(AutostartManager.is_enabled())
@@ -1043,11 +1170,15 @@ class MainWindow:
         # Load device mappings
         self._load_device_mappings()
         
+        # Load gaming mappings
+        self._load_gaming_mappings()
+        
         # Update UI state
         self._update_audio_ui_state()
         self._update_fan_ui_state()
         self._update_endpoints_status()
         self._update_streaming_ui_state()
+        self._update_gaming_ui_state()
         
         # Try to auto-detect Apple TV moniker if not set
         if not self.apple_tv_moniker_var.get():
@@ -1069,13 +1200,36 @@ class MainWindow:
             label = mapping.get('label', '')
             device_id = mapping.get('device_id', '')
             use_for_streaming = mapping.get('use_for_streaming', False)
-            self._add_device_mapping_row(label=label, device_id=device_id, use_for_streaming=use_for_streaming)
+            use_for_game = mapping.get('is_game', False)
+            self._add_device_mapping_row(label=label, device_id=device_id, use_for_streaming=use_for_streaming, use_for_game=use_for_game)
 
         # Add one empty row if no mappings exist
         if not mappings:
             self._add_device_mapping_row()
     
-    def _add_device_mapping_row(self, label="", device_id="", use_for_streaming=False):
+    def _load_gaming_mappings(self):
+        """Load gaming mappings into UI"""
+        # Clear existing rows
+        for row_data in self.gaming_mapping_rows:
+            for widget in row_data["widgets"]:
+                widget.destroy()
+        self.gaming_mapping_rows.clear()
+        
+        # Load mappings from settings
+        mappings = self.settings_manager.get_gaming_mappings()
+
+        # Populate rows
+        for mapping in mappings:
+            label = mapping.get('label', '')
+            steam_appid = mapping.get('steam_appid', '')
+            exe_path = mapping.get('exe_path', '')
+            self._add_gaming_mapping_row(label=label, steam_appid=steam_appid, exe_path=exe_path)
+
+        # Add one empty row if no mappings exist
+        if not mappings:
+            self._add_gaming_mapping_row()
+    
+    def _add_device_mapping_row(self, label="", device_id="", use_for_streaming=False, use_for_game=False):
         """Add a device mapping row (grid-aligned to the header)."""
         row_parent = getattr(self, 'mappings_table', None) or self.mappings_table
         row_index = len(self.mapping_rows) + 1  # header is row 0
@@ -1083,6 +1237,7 @@ class MainWindow:
         label_var = tk.StringVar(value=label)
         device_id_var = tk.StringVar(value=device_id)
         streaming_var = tk.BooleanVar(value=use_for_streaming)
+        game_var = tk.BooleanVar(value=use_for_game)
 
         # fetch device options (same logic as before)
         def _fetch_device_options():
@@ -1171,29 +1326,35 @@ class MainWindow:
             device_entry.grid(row=row_index, column=1, sticky="ew", padx=(5, 5), pady=2)
 
         streaming_cb = ctk.CTkSwitch(row_parent, text="", variable=streaming_var, command=lambda: self._on_streaming_checkbox_changed(streaming_var))
-        # Center the streaming toggle in its column
-        streaming_cb.grid(row=row_index, column=2, padx=(10, 5), pady=2)
+        # Center the streaming toggle in its column (no extra left-offset)
+        streaming_cb.grid(row=row_index, column=2, padx=0, pady=2)
+
+        # Game switch - ensure single selection across rows
+        game_cb = ctk.CTkSwitch(row_parent, text="", variable=game_var, command=lambda gv=game_var: self._on_game_checkbox_changed(gv))
+        game_cb.grid(row=row_index, column=3, padx=0, pady=2)
 
         delete_btn = ctk.CTkButton(row_parent, text="🗑 Delete", width=60, fg_color=getattr(self, '_danger', '#FC6A6A'), text_color=getattr(self, '_app_bg', '#1E1F2B'), hover_color=self._shade_color(getattr(self, '_danger', '#FC6A6A'), -10), command=lambda: None)
-        delete_btn.grid(row=row_index, column=3, padx=(5, 5), pady=2)
+        delete_btn.grid(row=row_index, column=4, padx=(5, 5), pady=3)
 
         # Ensure the middle column stretches
         try:
             self.mappings_table.columnconfigure(1, weight=1)
-            self.mappings_table.columnconfigure(2, minsize=30)
+            self.mappings_table.columnconfigure(2, minsize=8)
+            self.mappings_table.columnconfigure(3, minsize=8)
         except Exception:
             pass
 
         row_data = {
             "row": row_index,
-            "widgets": [label_entry, device_entry, streaming_cb, delete_btn],
-            "vars": {"label": label_var, "device_id": device_id_var, "streaming": streaming_var}
+            "widgets": [label_entry, device_entry, streaming_cb, game_cb, delete_btn],
+            "vars": {"label": label_var, "device_id": device_id_var, "streaming": streaming_var, "is_game": game_var}
         }
 
         # Setup change handlers
         label_var.trace_add("write", lambda *args: self._save_device_mappings())
         device_id_var.trace_add("write", lambda *args: self._save_device_mappings())
         streaming_var.trace_add("write", lambda *args: self._save_device_mappings())
+        game_var.trace_add("write", lambda *args: self._save_device_mappings())
 
         # Now that row_data exists, set the delete button's command to reference it
         try:
@@ -1202,6 +1363,65 @@ class MainWindow:
             pass
 
         self.mapping_rows.append(row_data)
+
+        return row_data
+    
+    def _add_gaming_mapping_row(self, label="", steam_appid="", exe_path=""):
+        """Add a gaming mapping row (grid-aligned to the header)."""
+        row_parent = getattr(self, 'gaming_mappings_table', None) or self.gaming_mappings_table
+        row_index = len(self.gaming_mapping_rows) + 1  # header is row 0
+
+        label_var = tk.StringVar(value=label)
+        steam_appid_var = tk.StringVar(value=steam_appid)
+        exe_path_var = tk.StringVar(value=exe_path)
+
+        label_entry = ctk.CTkEntry(row_parent, textvariable=label_var, width=120)
+        label_entry.grid(row=row_index, column=0, sticky="ew", padx=(5, 5), pady=2)
+
+        steam_appid_entry = ctk.CTkEntry(row_parent, textvariable=steam_appid_var, width=120)
+        steam_appid_entry.grid(row=row_index, column=1, sticky="ew", padx=(5, 5), pady=2)
+
+        exe_path_entry = ctk.CTkEntry(row_parent, textvariable=exe_path_var, width=200)
+        exe_path_entry.grid(row=row_index, column=2, sticky="ew", padx=(5, 5), pady=2)
+
+        delete_btn = ctk.CTkButton(row_parent, text="🗑 Delete", width=60, fg_color=getattr(self, '_danger', '#FC6A6A'), text_color=getattr(self, '_app_bg', '#1E1F2B'), hover_color=self._shade_color(getattr(self, '_danger', '#FC6A6A'), -10), command=lambda: None)
+        delete_btn.grid(row=row_index, column=3, padx=(5, 5), pady=3)
+
+        # Create error labels for Steam App ID and exe path
+        steam_appid_error = ctk.CTkLabel(row_parent, text="", text_color=self._danger, font=("TkDefaultFont", 8))
+        exe_path_error = ctk.CTkLabel(row_parent, text="", text_color=self._danger, font=("TkDefaultFont", 8))
+
+        # Position error labels beneath their respective fields (use next row)
+        error_row = row_index + 1
+        steam_appid_error.grid(row=error_row, column=1, sticky="ew", padx=(5, 5))
+        exe_path_error.grid(row=error_row, column=2, sticky="ew", padx=(5, 5))
+
+        # Ensure the columns stretch appropriately
+        try:
+            self.gaming_mappings_table.columnconfigure(1, weight=1)
+            self.gaming_mappings_table.columnconfigure(2, weight=1)
+        except Exception:
+            pass
+
+        row_data = {
+            "row": row_index,
+            "widgets": [label_entry, steam_appid_entry, exe_path_entry, delete_btn, steam_appid_error, exe_path_error],
+            "vars": {"label": label_var, "steam_appid": steam_appid_var, "exe_path": exe_path_var},
+            "error_labels": {"steam_appid": steam_appid_error, "exe_path": exe_path_error}
+        }
+
+        # Setup change handlers
+        label_var.trace_add("write", lambda *args: self._save_gaming_mappings())
+        steam_appid_var.trace_add("write", lambda *args, rd=row_data: self._validate_gaming_row(rd))
+        exe_path_var.trace_add("write", lambda *args, rd=row_data: self._validate_gaming_row(rd))
+
+        # Now that row_data exists, set the delete button's command to reference it
+        try:
+            delete_btn.configure(command=lambda rd=row_data: self._delete_gaming_mapping_row(rd))
+        except Exception:
+            pass
+
+        self.gaming_mapping_rows.append(row_data)
 
         return row_data
     
@@ -1221,15 +1441,76 @@ class MainWindow:
             label = row_data["vars"]["label"].get().strip()
             device_id = row_data["vars"]["device_id"].get().strip()
             streaming = row_data["vars"]["streaming"].get()
+            is_game = row_data["vars"]["is_game"].get()
             
             if label or device_id:  # Only save non-empty rows
                 mappings.append({
                     "label": label,
                     "device_id": device_id,
                     "use_for_streaming": streaming
+                    ,"is_game": is_game
                 })
         
         self.settings_manager.set_audio_mappings(mappings)
+
+    def _on_game_checkbox_changed(self, changed_var):
+        """Ensure only one mapping is marked as Game at a time."""
+        if changed_var.get():
+            for row_data in self.mapping_rows:
+                gv = row_data["vars"].get("is_game")
+                if gv is not None and gv != changed_var:
+                    gv.set(False)
+        self._save_device_mappings()
+    
+    def _validate_gaming_row(self, row_data):
+        """Validate a gaming mapping row - show error if both steam_appid and exe_path are filled"""
+        steam_appid = row_data["vars"]["steam_appid"].get().strip()
+        exe_path = row_data["vars"]["exe_path"].get().strip()
+        
+        steam_error_label = row_data["error_labels"]["steam_appid"]
+        exe_error_label = row_data["error_labels"]["exe_path"]
+        
+        # Clear previous errors
+        steam_error_label.configure(text="")
+        exe_error_label.configure(text="")
+        
+        if steam_appid and exe_path:
+            # Both filled - show error
+            error_msg = "Only fill Steam App ID OR Path to Exe, not both"
+            steam_error_label.configure(text=error_msg)
+            exe_error_label.configure(text=error_msg)
+        
+        # Always save mappings (validation is done there too)
+        self._save_gaming_mappings()
+    
+    def _save_gaming_mappings(self):
+        """Save gaming mappings to settings"""
+        mappings = []
+        for row_data in self.gaming_mapping_rows:
+            label = row_data["vars"]["label"].get().strip()
+            steam_appid = row_data["vars"]["steam_appid"].get().strip()
+            exe_path = row_data["vars"]["exe_path"].get().strip()
+            
+            if label or steam_appid or exe_path:  # Only save non-empty rows
+                mappings.append({
+                    "label": label,
+                    "steam_appid": steam_appid,
+                    "exe_path": exe_path
+                })
+        
+        self.settings_manager.set_gaming_mappings(mappings)
+    
+    def _delete_gaming_mapping_row(self, row_data):
+        """Delete a gaming mapping row"""
+        if row_data in self.gaming_mapping_rows:
+            self.gaming_mapping_rows.remove(row_data)
+            for widget in row_data["widgets"]:
+                widget.destroy()
+            self._save_gaming_mappings()
+    
+    def _add_gaming_mapping(self):
+        """Add new gaming mapping row"""
+        self._add_gaming_mapping_row()
     
     def _on_streaming_checkbox_changed(self, changed_var):
         """Handle streaming checkbox change - ensure only one is selected"""
@@ -1304,13 +1585,56 @@ class MainWindow:
     def _on_fan_apply_changed(self):
         """Handle fan apply on stream launch change"""
         enabled = self.fan_apply_var.get()
-        self.settings_manager.set_setting('fan.apply_on_stream_launch', enabled)
-        
-        if enabled:
-            self.fan_config_select_frame.pack(fill=tk.X, pady=(5, 0))
-            self._refresh_fan_configs()
-        else:
-            self.fan_config_select_frame.pack_forget()
+        try:
+            self.settings_manager.set_setting('fan.apply_on_stream_launch', enabled)
+        except Exception:
+            pass
+
+        # Show/hide only the stream selector row
+        try:
+            if enabled:
+                try:
+                    self.fan_stream_config_frame.pack(fill=tk.X, pady=(5, 0))
+                except Exception:
+                    pass
+                try:
+                    self._refresh_fan_configs()
+                except Exception:
+                    pass
+            else:
+                try:
+                    self.fan_stream_config_frame.pack_forget()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _on_fan_apply_game_changed(self):
+        """Handle fan apply on game launch change"""
+        enabled = self.fan_apply_game_var.get()
+        try:
+            self.settings_manager.set_setting('fan.apply_on_game_launch', enabled)
+        except Exception:
+            pass
+
+        # Show/hide only the game selector row
+        try:
+            if enabled:
+                try:
+                    self.fan_game_config_frame.pack(fill=tk.X, pady=(5, 0))
+                except Exception:
+                    pass
+                try:
+                    self._refresh_fan_configs()
+                except Exception:
+                    pass
+            else:
+                try:
+                    self.fan_game_config_frame.pack_forget()
+                except Exception:
+                    pass
+        except Exception:
+            pass
     
     def _on_streaming_enabled_changed(self):
         """Handle streaming enabled change"""
@@ -1318,6 +1642,12 @@ class MainWindow:
                                          self.streaming_enabled_var.get())
         self._update_endpoints_status()
         self._update_streaming_ui_state()
+
+    def _on_gaming_enabled_changed(self):
+        """Handle gaming enabled change"""
+        self.settings_manager.set_setting('gaming.enabled', self.gaming_enabled_var.get())
+        self._update_gaming_ui_state()
+        self._update_endpoints_status()
 
     def _update_streaming_ui_state(self):
         """Show or hide the Apple TV moniker field depending on streaming endpoint toggle"""
@@ -1336,6 +1666,40 @@ class MainWindow:
                         pass
         except Exception:
             pass
+    
+    def _update_gaming_ui_state(self):
+        """Update gaming UI state based on enabled setting"""
+        enabled = self.gaming_enabled_var.get()
+        
+        # Show or hide the gaming mappings card depending on gaming enabled state
+        try:
+            gaming_mapping_card = getattr(self, 'gaming_mapping_card', None)
+            if gaming_mapping_card:
+                if enabled:
+                    try:
+                        # Use the original pack options used during creation
+                        gaming_mapping_card.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        gaming_mapping_card.pack_forget()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        # Enable/disable gaming-related widgets
+        widgets = []
+        for row in getattr(self, 'gaming_mapping_rows', []):
+            widgets.extend(row["widgets"])
+        
+        state = "normal" if enabled else "disabled"
+        for widget in widgets:
+            try:
+                widget.configure(state=state)
+            except tk.TclError:
+                pass  # Some widgets don't support state
     
     def _on_apple_tv_moniker_changed(self, *args):
         """Handle Apple TV moniker change"""
@@ -1460,9 +1824,13 @@ class MainWindow:
         try:
             if enabled:
                 # Restore apply frame visibility if apply is set
-                if self.fan_apply_var.get():
+                if self.fan_apply_var.get() or self.fan_apply_game_var.get():
                     try:
-                        self.fan_config_select_frame.pack(fill=tk.X, pady=(5, 0))
+                        self.fan_stream_config_frame.pack(fill=tk.X, pady=(5, 0))
+                    except Exception:
+                        pass
+                    try:
+                        self.fan_game_config_frame.pack(fill=tk.X, pady=(5, 0))
                     except Exception:
                         pass
                 # Ensure the apply switch is enabled
@@ -1470,19 +1838,35 @@ class MainWindow:
                     self.fan_apply_switch.configure(state="normal")
                 except Exception:
                     pass
+                try:
+                    # Also enable the game-apply switch so both behave the same
+                    self.fan_apply_game_switch.configure(state="normal")
+                except Exception:
+                    pass
             else:
                 # When fan endpoints are disabled, force apply off and disable the switch
                 try:
                     self.fan_apply_var.set(False)
+                    self.fan_apply_game_var.set(False)
                     self.settings_manager.set_setting('fan.apply_on_stream_launch', False)
+                    self.settings_manager.set_setting('fan.apply_on_game_launch', False)
                 except Exception:
                     pass
                 try:
-                    self.fan_config_select_frame.pack_forget()
+                    self.fan_stream_config_frame.pack_forget()
                 except Exception:
                     pass
                 try:
+                    self.fan_game_config_frame.pack_forget()
+                except Exception:
+                    pass
+                try:
+                    # Disable both apply switches when fan endpoints are disabled
                     self.fan_apply_switch.configure(state="disabled")
+                except Exception:
+                    pass
+                try:
+                    self.fan_apply_game_switch.configure(state="disabled")
                 except Exception:
                     pass
         except Exception:
@@ -1708,20 +2092,100 @@ class MainWindow:
     def _refresh_fan_configs(self):
         """Refresh fan configuration list"""
         try:
-            configs = self.settings_manager.parse_fan_configs()
-            self.fan_config_combo['values'] = configs
-            
-            # Select current config if set
+            configs = self.settings_manager.parse_fan_configs() or []
+
+            # Try to update both stream and game combo widgets' values in a way that
+            # works for CTkComboBox and CTkOptionMenu across CTk versions.
+            updated = False
+            for combo_name in ('fan_stream_combo', 'fan_game_combo'):
+                combo = getattr(self, combo_name, None)
+                if combo is None:
+                    continue
+                try:
+                    # Preferred: configure(values=...)
+                    combo.configure(values=configs)
+                    updated = True
+                    continue
+                except Exception:
+                    pass
+                try:
+                    # Fallback: dict-style assignment (works for some CTkComboBox builds)
+                    combo['values'] = configs
+                    updated = True
+                except Exception:
+                    pass
+
+            # Select current config if set (try .set(), which works for both widgets)
             current = self.settings_manager.get_setting('fan.selected_config', '')
-            if current in configs:
-                self.fan_config_combo.set(current)
-            elif configs:
-                self.fan_config_combo.set(configs[0])
-                self.settings_manager.set_setting('fan.selected_config', configs[0])
+            # Load current selections for stream and game selectors
+            current_stream = self.settings_manager.get_setting('fan.selected_config_stream', '')
+            current_game = self.settings_manager.get_setting('fan.selected_config_game', '')
+            try:
+                if hasattr(self, 'fan_stream_combo'):
+                    if current_stream and current_stream in configs:
+                        try:
+                            self.fan_stream_combo.set(current_stream)
+                        except Exception:
+                            pass
+                    elif configs:
+                        try:
+                            self.fan_stream_combo.set(configs[0])
+                            # persist default if none set
+                            self.settings_manager.set_setting('fan.selected_config_stream', configs[0])
+                            # maintain legacy key for backward compatibility
+                            try:
+                                self.settings_manager.set_setting('fan.selected_config', configs[0])
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
+
+                if hasattr(self, 'fan_game_combo'):
+                    if current_game and current_game in configs:
+                        try:
+                            self.fan_game_combo.set(current_game)
+                        except Exception:
+                            pass
+                    elif configs:
+                        try:
+                            # If game has no saved value, default to first but do not overwrite stream
+                            self.fan_game_combo.set(configs[0])
+                            self.settings_manager.set_setting('fan.selected_config_game', configs[0])
+                        except Exception:
+                            pass
+            except Exception:
+                # If .set() isn't supported, ignore silently
+                pass
+
+            # Ensure the combo/menu is enabled for user interaction when configs exist
+            try:
+                # Enable/disable both combos based on whether configs exist
+                if configs:
+                    for combo in (getattr(self, 'fan_stream_combo', None), getattr(self, 'fan_game_combo', None)):
+                        if combo is None:
+                            continue
+                        try:
+                            combo.configure(state='readonly')
+                        except Exception:
+                            try:
+                                combo.configure(state='normal')
+                            except Exception:
+                                pass
+                else:
+                    for combo in (getattr(self, 'fan_stream_combo', None), getattr(self, 'fan_game_combo', None)):
+                        if combo is None:
+                            continue
+                        try:
+                            combo.configure(state='disabled')
+                        except Exception:
+                            pass
+            except Exception:
+                pass
                 
         except Exception as e:
             logger.error(f"Error refreshing fan configs: {e}")
             messagebox.showerror("Error", f"Failed to refresh fan configs: {str(e)}")
+
     
     def _auto_detect_appletv(self):
         """Auto-detect Apple TV moniker"""
@@ -1769,9 +2233,15 @@ class MainWindow:
     
     def _test_endpoint(self, endpoint_info):
         """Test an endpoint"""
+        target = getattr(self, 'endpoints_result_text', None)
         if not self.app.is_server_running():
-            endpoint_info["result_text"].delete(1.0, tk.END)
-            endpoint_info["result_text"].insert(1.0, "Error: Server is not running")
+            if target:
+                try:
+                    target.delete(1.0, tk.END)
+                    target.insert(1.0, "Error: Server is not running")
+                except Exception:
+                    pass
+            return
             return
         
         try:
@@ -1801,12 +2271,20 @@ class MainWindow:
             except:
                 result_text += response.text
                 
-            endpoint_info["result_text"].delete(1.0, tk.END)
-            endpoint_info["result_text"].insert(1.0, result_text)
+            if target:
+                try:
+                    target.delete(1.0, tk.END)
+                    target.insert(1.0, result_text)
+                except Exception:
+                    pass
             
         except Exception as e:
-            endpoint_info["result_text"].delete(1.0, tk.END)
-            endpoint_info["result_text"].insert(1.0, f"Error: {str(e)}")
+            if target:
+                try:
+                    target.delete(1.0, tk.END)
+                    target.insert(1.0, f"Error: {str(e)}")
+                except Exception:
+                    pass
     
     def _copy_curl(self, endpoint_info):
         """Copy cURL command to clipboard"""

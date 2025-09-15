@@ -2,6 +2,11 @@
 """
 Settings management for MyLocalAPI
 Handles JSON persistence, validation, and default values
+
+Author: Aidan Paetsch
+Date: 2025-09-15
+License: See LICENSE (GNU GPL v3.0)
+Disclaimer: Provided AS IS. See README.md 'AS IS Disclaimer' for details.
 """
 
 import json
@@ -35,7 +40,8 @@ class SettingsManager:
                 {
                     "label": "screen",
                     "device_id": "NVIDIA High Definition Audio\\Device\\M32UC\\Render", 
-                    "use_for_streaming": False
+                    "use_for_streaming": False,
+                    "is_game": False
                 }
             ]
         },
@@ -44,11 +50,26 @@ class SettingsManager:
             "fan_exe_path": "",
             "fan_config_path": "",
             "apply_on_stream_launch": False,
+            "apply_on_game_launch": False,
+            # Two separate selected config keys so stream and game can use different configs
+            "selected_config_stream": "",
+            "selected_config_game": "",
+            # Keep legacy key for compatibility
             "selected_config": ""
         },
         "streaming": {
             "launch_streaming_by_endpoint": True,
             "appleTVMoniker": "AppleInc.AppleTVWin_nzyj5cx40ttqa"
+        },
+        "gaming": {
+            "enabled": True,
+            "games": [
+                {
+                    "label": "Example Game",
+                    "steam_appid": "123456",
+                    "exe_path": ""
+                }
+            ]
         },
         "autostart": False
     }
@@ -111,6 +132,11 @@ class SettingsManager:
     
     def set_setting(self, key_path: str, value: Any, save: bool = True) -> bool:
         """Set a setting value using dot notation"""
+        # Check if this is a port change for firewall rule management
+        old_port = None
+        if key_path == 'port':
+            old_port = self.get_setting('port', 1482)
+        
         keys = key_path.split('.')
         settings_ref = self.settings
         
@@ -122,6 +148,10 @@ class SettingsManager:
         
         # Set final value
         settings_ref[keys[-1]] = value
+        
+        # Handle port change - update firewall rules
+        if key_path == 'port' and old_port != value:
+            self._update_firewall_rules(old_port, value)
         
         if save:
             return self.save_settings()
@@ -145,9 +175,17 @@ class SettingsManager:
         # Ensure only one mapping has use_for_streaming=True
         streaming_count = sum(1 for m in mappings if m.get('use_for_streaming', False))
         if streaming_count > 1:
-            # Reset all and set only the first one
+            # Keep only the first True
+            first_index = next(i for i, m in enumerate(mappings) if m.get('use_for_streaming', False))
             for i, mapping in enumerate(mappings):
-                mapping['use_for_streaming'] = (i == 0 and streaming_count > 0)
+                mapping['use_for_streaming'] = (i == first_index)
+
+        # Ensure only one mapping has is_game=True
+        game_count = sum(1 for m in mappings if m.get('is_game', False))
+        if game_count > 1:
+            first_game = next(i for i, m in enumerate(mappings) if m.get('is_game', False))
+            for i, mapping in enumerate(mappings):
+                mapping['is_game'] = (i == first_game)
         
         return self.set_setting('audio.mappings', mappings, save)
     
@@ -203,10 +241,27 @@ class SettingsManager:
                 errors.append(f"Fan config directory not found: {fan_config}")
             
             # Check selected config if apply_on_stream_launch is enabled
-            if self.get_setting('fan.apply_on_stream_launch', False):
+            if self.get_setting('fan.apply_on_stream_launch', False) or self.get_setting('fan.apply_on_game_launch', False):
                 selected = self.get_setting('fan.selected_config', '').strip()
                 if not selected:
                     errors.append("Fan apply on stream launch is enabled but no config is selected")
+        
+        # Gaming validation
+        if self.get_setting('gaming.enabled', True):
+            mappings = self.get_gaming_mappings()
+            if mappings:
+                # Check if at least one mapping is complete
+                complete_mappings = []
+                for m in mappings:
+                    label = m.get('label', '').strip()
+                    steam_appid = m.get('steam_appid', '').strip()
+                    exe_path = m.get('exe_path', '').strip()
+                    
+                    if label and (steam_appid or exe_path) and not (steam_appid and exe_path):
+                        complete_mappings.append(m)
+                
+                if not complete_mappings:
+                    errors.append("Gaming control is enabled but no complete game mappings found")
         
         return errors
     
@@ -241,6 +296,39 @@ class SettingsManager:
     def get_device_mapping_by_label(self, label: str) -> Optional[Dict[str, Any]]:
         """Get device mapping by label"""
         mappings = self.get_audio_mappings()
+        for mapping in mappings:
+            if mapping.get('label', '').strip().lower() == label.strip().lower():
+                return mapping
+        return None
+    
+    def get_gaming_mappings(self) -> List[Dict[str, Any]]:
+        """Get gaming mappings"""
+        return self.get_setting('gaming.games', [])
+    
+    def set_gaming_mappings(self, mappings: List[Dict[str, Any]], save: bool = True) -> bool:
+        """Set gaming mappings"""
+        # Validate mappings
+        for mapping in mappings:
+            if not isinstance(mapping, dict):
+                return False
+            if 'label' not in mapping:
+                return False
+            if not mapping.get('label', '').strip():
+                return False
+            
+            # Check that either steam_appid or exe_path is filled, but not both
+            steam_appid = mapping.get('steam_appid', '').strip()
+            exe_path = mapping.get('exe_path', '').strip()
+            if steam_appid and exe_path:
+                return False  # Both filled is invalid
+            if not steam_appid and not exe_path:
+                return False  # Neither filled is invalid
+        
+        return self.set_setting('gaming.games', mappings, save)
+    
+    def get_game_mapping_by_label(self, label: str) -> Optional[Dict[str, Any]]:
+        """Get game mapping by label"""
+        mappings = self.get_gaming_mappings()
         for mapping in mappings:
             if mapping.get('label', '').strip().lower() == label.strip().lower():
                 return mapping
@@ -297,3 +385,39 @@ class SettingsManager:
         """Check if server is configured for network access"""
         host = self.get_setting('host', '127.0.0.1')
         return host in ['0.0.0.0'] or (host not in ['127.0.0.1', 'localhost'])
+    
+    def _update_firewall_rules(self, old_port: Optional[int], new_port: int) -> None:
+        """Update Windows Firewall rules when port changes"""
+        try:
+            from utils import create_firewall_rule, remove_firewall_rule
+            
+            # Remove old firewall rule if it exists
+            if old_port is not None and old_port != new_port:
+                logger.info(f"Removing old firewall rule for port {old_port}")
+                remove_firewall_rule("MyLocalAPI", old_port)
+            
+            # Create new firewall rule
+            allow_network = self.is_network_accessible()
+            logger.info(f"Creating firewall rule for port {new_port} (network access: {allow_network})")
+            
+            success = create_firewall_rule(new_port, "MyLocalAPI", allow_network)
+            if success:
+                logger.info(f"Successfully created firewall rule for port {new_port}")
+            else:
+                logger.warning(f"Failed to create firewall rule for port {new_port}")
+                
+        except Exception as e:
+            logger.error(f"Error updating firewall rules: {e}")
+    
+    def ensure_firewall_rule(self) -> bool:
+        """Ensure current port has proper firewall rule"""
+        try:
+            from utils import create_firewall_rule
+            
+            port = self.get_setting('port', 1482)
+            allow_network = self.is_network_accessible()
+            
+            return create_firewall_rule(port, "MyLocalAPI", allow_network)
+        except Exception as e:
+            logger.error(f"Error ensuring firewall rule: {e}")
+            return False

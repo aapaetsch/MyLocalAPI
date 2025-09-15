@@ -2,12 +2,18 @@
 """
 MyLocalAPI - Local HTTP server for PC control
 Main entry point and application coordinator
+
+Author: Aidan Paetsch
+Date: 2025-09-15
+License: See LICENSE (GNU GPL v3.0)
+Disclaimer: Provided AS IS. See README.md 'AS IS Disclaimer' for details.
 """
 
 import os
 import sys
 import threading
 import time
+import argparse
 try:
     import customtkinter as ctk
     CTK_AVAILABLE = True
@@ -24,7 +30,7 @@ from ctypes import wintypes
 from server import FlaskServer
 from gui import MainWindow
 from settings import SettingsManager
-from utils import get_app_data_dir, is_admin, setup_logging
+from utils import get_app_data_dir, is_admin, setup_logging, check_and_elevate
 import logging
 
 class MyLocalAPIApp:
@@ -266,13 +272,8 @@ class MyLocalAPIApp:
             self.flask_server = FlaskServer(self.settings_manager)
             self.flask_server.start()
             
-            # Create appropriate firewall rule
-            port = self.settings_manager.get_setting('port', 1482)
-            host = self.settings_manager.get_setting('host', '127.0.0.1')
-            allow_network = (host == '0.0.0.0' or host not in ['127.0.0.1', 'localhost'])
-            
-            from utils import create_firewall_rule
-            create_firewall_rule(port, "MyLocalAPI", allow_network)
+            # Ensure firewall rule is properly configured
+            self.settings_manager.ensure_firewall_rule()
             
             self.update_tray_menu()
             if self.main_window:
@@ -346,6 +347,28 @@ class MyLocalAPIApp:
 
 def main():
     """Main entry point"""
+    # Handle command line arguments
+    import argparse
+    parser = argparse.ArgumentParser(description='MyLocalAPI - Local HTTP server for PC control')
+    parser.add_argument('--elevated', action='store_true', help='Internal flag for elevated restart')
+    parser.add_argument('--no-elevation', action='store_true', help='Skip automatic elevation check')
+    args = parser.parse_args()
+    
+    # Check for administrator privileges and elevate if needed (unless disabled)
+    if sys.platform == 'win32' and not args.no_elevation:
+        try:
+            if check_and_elevate(force=False, show_prompt=True):
+                # Elevation was requested, exit this instance
+                sys.exit(0)
+        except Exception as e:
+            logging.warning(f"Elevation check failed: {e}")
+    
+    # Log admin status
+    if is_admin():
+        logging.info("Running with administrator privileges - full functionality available")
+    else:
+        logging.info("Running without administrator privileges - fan control may be limited")
+    
     # Check if already running (simple check)
     import tempfile
     

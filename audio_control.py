@@ -2,6 +2,11 @@
 """
 Audio device control using NirSoft SoundVolumeCommandLine (svcl.exe)
 Provides device switching, volume control, and device enumeration
+
+Author: Aidan Paetsch
+Date: 2025-09-15
+License: See LICENSE (GNU GPL v3.0)
+Disclaimer: Provided AS IS. See README.md 'AS IS Disclaimer' for details.
 """
 
 import os
@@ -52,39 +57,64 @@ class AudioController:
     def get_devices_raw(self) -> Dict[str, Any]:
         """Get raw device information from svcl.exe"""
         try:
-            # Use CSV output with stdout for better parsing
-            columns = 'Name,Device Name,Direction,Default,Default Multimedia,Default Communications,Volume Percent,Command-Line Friendly ID'
-            
-            result = self._run_svcl(['/scomma', '""', '/Columns', f'"{columns}"'])
+            # Use /Stdout with /scomma to get all CSV data to stdout
+            result = self._run_svcl(['/Stdout', '/scomma'])
             
             if result.returncode != 0:
                 logger.error(f"svcl.exe returned error code {result.returncode}: {result.stderr}")
                 return {"ok": False, "rows": [], "error": result.stderr}
             
-            # Parse CSV output
+            # Parse CSV output from stdout
             if not result.stdout.strip():
                 return {"ok": False, "rows": [], "error": "No output from svcl.exe"}
             
-            # Split columns and parse CSV
-            col_list = [col.strip() for col in columns.split(',')]
+            # Remove BOM if present and parse CSV
+            csv_content = result.stdout
+            if csv_content.startswith('\ufeff'):
+                csv_content = csv_content[1:]  # Remove BOM
             
-            # Skip the first line if it contains headers and parse as CSV
-            csv_lines = result.stdout.strip().split('\n')
-            if len(csv_lines) > 1:
-                csv_lines = csv_lines[1:]  # Skip header
+            # Also handle the visible BOM characters that might appear
+            csv_content = csv_content.replace('ï»¿', '')
             
+            csv_lines = csv_content.strip().split('\n')
+            if len(csv_lines) < 2:
+                return {"ok": False, "rows": [], "error": "Insufficient CSV data"}
+            
+            # Parse header to get column indices
+            header_line = csv_lines[0]
+            data_lines = csv_lines[1:]
+            
+            csv_reader = csv.reader([header_line])
+            all_headers = next(csv_reader)
+            
+            # Clean up header names (remove any remaining BOM characters)
+            all_headers = [h.replace('\ufeff', '').replace('ï»¿', '') for h in all_headers]
+            
+            # Find the columns we need
+            required_columns = ['Name', 'Device Name', 'Direction', 'Default', 
+                               'Default Multimedia', 'Default Communications', 
+                               'Volume Percent', 'Command-Line Friendly ID']
+            
+            column_indices = {}
+            for col in required_columns:
+                try:
+                    column_indices[col] = all_headers.index(col)
+                except ValueError:
+                    logger.warning(f"Column '{col}' not found in svcl.exe output")
+            
+            # Parse data rows
             rows = []
-            csv_reader = csv.reader(csv_lines)
+            csv_reader = csv.reader(data_lines)
             
             for row_data in csv_reader:
-                if len(row_data) >= len(col_list):
+                if len(row_data) > max(column_indices.values(), default=-1):
                     row = {}
-                    for i, col_name in enumerate(col_list):
-                        row[col_name] = row_data[i] if i < len(row_data) else ""
+                    for col_name, col_index in column_indices.items():
+                        row[col_name] = row_data[col_index] if col_index < len(row_data) else ""
                     rows.append(row)
             
             logger.debug(f"Parsed {len(rows)} audio devices")
-            return {"ok": True, "rows": rows, "headers": col_list}
+            return {"ok": True, "rows": rows, "headers": list(required_columns)}
             
         except Exception as e:
             logger.error(f"Error getting device information: {e}")

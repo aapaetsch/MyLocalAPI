@@ -2,6 +2,11 @@
 """
 Flask HTTP server for MyLocalAPI
 Provides REST endpoints for audio control, streaming, and fan management
+
+Author: Aidan Paetsch
+Date: 2025-09-15
+License: See LICENSE (GNU GPL v3.0)
+Disclaimer: Provided AS IS. See README.md 'AS IS Disclaimer' for details.
 """
 
 import threading
@@ -16,6 +21,7 @@ from settings import SettingsManager
 from audio_control import AudioController
 from streaming import StreamingController
 from fan_control import FanController
+from gaming_control import GamingController
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +41,7 @@ class FlaskServer:
         self.audio_controller = None
         self.streaming_controller = None
         self.fan_controller = None
+        self.gaming_controller = None
         
         self._setup_routes()
         self._init_controllers()
@@ -57,6 +64,10 @@ class FlaskServer:
                 fan_config = self.settings_manager.get_setting('fan.fan_config_path', '')
                 if fan_exe and fan_config:
                     self.fan_controller = FanController(fan_exe, fan_config)
+            
+            # Gaming controller
+            if self.settings_manager.get_setting('gaming.enabled', True):
+                self.gaming_controller = GamingController()
                     
         except Exception as e:
             logger.error(f"Error initializing controllers: {e}")
@@ -87,9 +98,19 @@ class FlaskServer:
                 "status": "running",
                 "endpoints": [
                     "/switch", "/volume", "/volume/current", "/device/current",
-                    "/openStreaming", "/fan/apply", "/fan/refresh", "/fan/configs",
-                    "/fan/status", "/list", "/status", "/diag"
+                    "/openStreaming", "/launchGame", "/gaming/games", "/gaming/launch",
+                    "/fan/apply", "/fan/refresh", "/fan/configs", "/fan/status", 
+                    "/list", "/status", "/diag", "/health"
                 ]
+            })
+        
+        @self.app.route('/health', methods=['GET'])
+        def health_check():
+            """Health check endpoint (no auth required)"""
+            return jsonify({
+                "status": "healthy",
+                "service": "MyLocalAPI",
+                "version": "1.0.0"
             })
         
         @self.app.route('/switch', methods=['GET'])
@@ -236,6 +257,103 @@ class FlaskServer:
                 logger.error(f"Error in /device/current: {e}")
                 return jsonify({"error": str(e)}), 500
         
+        # Additional audio endpoints
+        @self.app.route('/audio/devices', methods=['GET'])
+        @self._require_auth 
+        def get_audio_devices():
+            """Get list of audio devices"""
+            if not self.settings_manager.get_setting('audio.enabled', True):
+                return jsonify({"error": "Audio control is disabled"}), 403
+            
+            if not self.audio_controller:
+                return jsonify({"error": "Audio controller not available"}), 500
+            
+            try:
+                result = self.audio_controller.get_playback_devices()
+                if result["ok"]:
+                    return jsonify({
+                        "ok": True,
+                        "devices": result["devices"]
+                    })
+                else:
+                    return jsonify({"error": "Failed to get devices"}), 500
+            except Exception as e:
+                logger.error(f"Error in /audio/devices: {e}")
+                return jsonify({"error": str(e)}), 500
+        
+        @self.app.route('/audio/set_default', methods=['POST'])
+        @self._require_auth
+        def set_default_audio_device():
+            """Set default audio device"""
+            if not self.settings_manager.get_setting('audio.enabled', True):
+                return jsonify({"error": "Audio control is disabled"}), 403
+            
+            if not self.audio_controller:
+                return jsonify({"error": "Audio controller not available"}), 500
+            
+            try:
+                data = request.get_json()
+                if not data:
+                    return jsonify({"error": "JSON body required"}), 400
+                
+                device_name = data.get('device_name')
+                device_id = data.get('device_id')
+                
+                if device_id:
+                    # Direct device ID
+                    success = self.audio_controller.set_default_device(device_id)
+                    if success:
+                        return jsonify({"ok": True, "device_id": device_id})
+                    else:
+                        return jsonify({"error": "Failed to set device"}), 500
+                        
+                elif device_name:
+                    # Device name - find in mappings
+                    mappings = self.settings_manager.get_audio_mappings()
+                    result = self.audio_controller.switch_to_device_by_key(device_name, mappings)
+                    if result["ok"]:
+                        return jsonify(result)
+                    else:
+                        return jsonify({"error": result["error"]}), 404
+                else:
+                    return jsonify({"error": "Missing 'device_name' or 'device_id'"}), 400
+                    
+            except Exception as e:
+                logger.error(f"Error in /audio/set_default: {e}")
+                return jsonify({"error": str(e)}), 500
+        
+        @self.app.route('/audio/current', methods=['GET'])
+        @self._require_auth
+        def get_current_audio():
+            """Get current audio device and volume"""
+            if not self.settings_manager.get_setting('audio.enabled', True):
+                return jsonify({"error": "Audio control is disabled"}), 403
+            
+            if not self.audio_controller:
+                return jsonify({"error": "Audio controller not available"}), 500
+            
+            try:
+                mappings = self.settings_manager.get_audio_mappings()
+                snapshot = self.audio_controller.get_audio_snapshot(mappings)
+                
+                if snapshot["ok"]:
+                    return jsonify({
+                        "ok": True,
+                        "device": {
+                            "id": snapshot["device_id"],
+                            "name": snapshot["device_name"],
+                            "active_key": snapshot["active_key"],
+                            "matched": snapshot["matched"]
+                        },
+                        "volume": snapshot["volume"]
+                    })
+                else:
+                    return jsonify({"error": "Could not get current audio info"}), 500
+                    
+            except Exception as e:
+                logger.error(f"Error in /audio/current: {e}")
+                return jsonify({"error": str(e)}), 500
+        
         @self.app.route('/openStreaming', methods=['GET'])
         @self._require_auth
         def open_streaming():
@@ -286,6 +404,206 @@ class FlaskServer:
                 logger.error(f"Error in /openStreaming: {e}")
                 return jsonify({"error": str(e)}), 500
         
+        @self.app.route('/streaming/launch', methods=['GET'])
+        @self._require_auth
+        def launch_streaming():
+            """Launch streaming service (alternative endpoint)"""
+            if not self.settings_manager.get_setting('streaming.launch_streaming_by_endpoint', True):
+                return jsonify({
+                    "error": "Streaming service endpoint is disabled",
+                    "details": "Enable 'Launch Streaming service by endpoint' in settings"
+                }), 403
+            
+            service = request.args.get('service')
+            if not service:
+                return jsonify({"error": "Missing 'service' parameter"}), 400
+            
+            # Delegate to the existing openStreaming logic
+            return open_streaming()
+        
+        @self.app.route('/launchGame', methods=['GET'])
+        @self._require_auth
+        def launch_game():
+            """Launch a game"""
+            if not self.settings_manager.get_setting('gaming.enabled', True):
+                return jsonify({
+                    "error": "Gaming endpoint is disabled",
+                    "details": "Enable gaming launch endpoints in settings"
+                }), 403
+            
+            if not self.gaming_controller:
+                return jsonify({"error": "Gaming controller not available"}), 500
+            
+            label = request.args.get('label')
+            steam_appid = request.args.get('steamid')
+            exe_path = request.args.get('path')
+            
+            try:
+                # Determine launch method
+                if label:
+                    # Launch by label using mappings
+                    mappings = self.settings_manager.get_gaming_mappings()
+                    result = self.gaming_controller.launch_game_by_label(label, mappings)
+                    
+                elif steam_appid:
+                    # Direct Steam App ID launch
+                    result = self.gaming_controller.launch_game_by_steam_id(steam_appid)
+                    
+                elif exe_path:
+                    # Direct executable launch
+                    result = self.gaming_controller.launch_game_by_executable(exe_path)
+                    
+                else:
+                    return jsonify({"error": "Missing 'label', 'steamid', or 'path' parameter"}), 400
+                
+                if result["ok"]:
+                    # Apply fan config if enabled for gaming
+                    if (self.fan_controller and 
+                        self.settings_manager.get_setting('fan.enabled', False) and
+                        self.settings_manager.get_setting('fan.apply_on_game_launch', False)):
+                        
+                        selected_config = self.settings_manager.get_setting('fan.selected_config_game', '')
+                        if selected_config:
+                            try:
+                                fan_result = self.fan_controller.set_fan_profile(selected_config)
+                                if fan_result["ok"]:
+                                    logger.info(f"Applied game fan config: {selected_config}")
+                                    result["fan_config_applied"] = selected_config
+                            except Exception as e:
+                                logger.warning(f"Failed to apply game fan config: {e}")
+                                result["fan_config_error"] = str(e)
+                    
+                    # Switch to game audio device if configured
+                    if (self.audio_controller and 
+                        self.settings_manager.get_setting('audio.enabled', True)):
+                        
+                        try:
+                            # Check if there's a game audio device configured in audio mappings
+                            audio_mappings = self.settings_manager.get_audio_mappings()
+                            for audio_mapping in audio_mappings:
+                                if audio_mapping.get('is_game', False):
+                                    # Switch to the game audio device
+                                    audio_result = self.audio_controller.switch_to_device_by_key(
+                                        audio_mapping.get('label', ''), audio_mappings)
+                                    if audio_result["ok"]:
+                                        logger.info(f"Switched to game audio device: {audio_mapping.get('label')}")
+                                        result["audio_device_switched"] = audio_mapping.get('label')
+                                    break
+                        except Exception as e:
+                            logger.warning(f"Failed to switch to game audio device: {e}")
+                            result["audio_switch_error"] = str(e)
+                    
+                    return jsonify(result)
+                else:
+                    return jsonify({"error": result["error"]}), 500
+                    
+            except Exception as e:
+                logger.error(f"Error in /launchGame: {e}")
+                return jsonify({"error": str(e)}), 500
+        
+        # Gaming endpoints
+        @self.app.route('/gaming/games', methods=['GET'])
+        @self._require_auth
+        def get_games():
+            """Get list of configured games"""
+            if not self.settings_manager.get_setting('gaming.enabled', True):
+                return jsonify({"error": "Gaming endpoints are disabled"}), 403
+            
+            try:
+                games = self.settings_manager.get_gaming_mappings()
+                return jsonify({
+                    "ok": True,
+                    "games": games,
+                    "total": len(games)
+                })
+            except Exception as e:
+                logger.error(f"Error in /gaming/games: {e}")
+                return jsonify({"error": str(e)}), 500
+        
+        @self.app.route('/gaming/launch', methods=['POST'])
+        @self._require_auth
+        def launch_game_new():
+            """Launch a game using new endpoint format"""
+            if not self.settings_manager.get_setting('gaming.enabled', True):
+                return jsonify({
+                    "error": "Gaming endpoints are disabled",
+                    "details": "Enable gaming endpoints in settings"
+                }), 403
+            
+            if not self.gaming_controller:
+                return jsonify({"error": "Gaming controller not available"}), 500
+            
+            try:
+                data = request.get_json()
+                if not data:
+                    return jsonify({"error": "JSON body required"}), 400
+                
+                game_id = data.get('game_id')
+                if not game_id:
+                    return jsonify({"error": "Missing 'game_id' in request body"}), 400
+                
+                # Launch game by ID from mappings
+                mappings = self.settings_manager.get_gaming_mappings()
+                
+                # Find the game by ID
+                game_data = None
+                for game in mappings:
+                    if game.get('id') == game_id:
+                        game_data = game
+                        break
+                
+                if not game_data:
+                    return jsonify({"error": f"Game '{game_id}' not found in mappings"}), 404
+                
+                # Determine launch method
+                result = None
+                steam_appid = game_data.get('steam_appid', '').strip()
+                exe_path = game_data.get('exe_path', '').strip()
+                
+                if steam_appid:
+                    result = self.gaming_controller.launch_game_by_steam_id(steam_appid)
+                elif exe_path:
+                    result = self.gaming_controller.launch_game_by_executable(exe_path)
+                else:
+                    return jsonify({"error": "Game has no valid launch method configured"}), 400
+                
+                if result and result.get("ok"):
+                    # Apply fan config if configured for this game
+                    fan_profile = game_data.get('fan_profile', '').strip()
+                    if (fan_profile and self.fan_controller and 
+                        self.settings_manager.get_setting('fan.enabled', False)):
+                        try:
+                            fan_result = self.fan_controller.set_fan_profile(fan_profile)
+                            if fan_result["ok"]:
+                                logger.info(f"Applied fan config: {fan_profile}")
+                                result["fan_config_applied"] = fan_profile
+                        except Exception as e:
+                            logger.warning(f"Failed to apply fan config: {e}")
+                            result["fan_config_error"] = str(e)
+                    
+                    # Switch to game audio device if configured
+                    audio_device = game_data.get('audio_device', '').strip()
+                    if (audio_device and self.audio_controller and 
+                        self.settings_manager.get_setting('audio.enabled', True)):
+                        try:
+                            audio_mappings = self.settings_manager.get_audio_mappings()
+                            audio_result = self.audio_controller.switch_to_device_by_key(audio_device, audio_mappings)
+                            if audio_result["ok"]:
+                                logger.info(f"Switched to audio device: {audio_device}")
+                                result["audio_device_switched"] = audio_device
+                        except Exception as e:
+                            logger.warning(f"Failed to switch audio device: {e}")
+                            result["audio_switch_error"] = str(e)
+                    
+                    return jsonify(result)
+                else:
+                    error_msg = result.get("error", "Unknown error") if result else "Launch failed"
+                    return jsonify({"error": error_msg}), 500
+                    
+            except Exception as e:
+                logger.error(f"Error in /gaming/launch: {e}")
+                return jsonify({"error": str(e)}), 500
+        
         @self.app.route('/fan/apply', methods=['GET'])
         @self._require_auth
         def apply_fan_config():
@@ -296,17 +614,20 @@ class FlaskServer:
             if not self.fan_controller:
                 return jsonify({"error": "Fan controller not available"}), 500
             
+            # Check if admin privileges are available for config switching
+            if not self.fan_controller.can_switch_configs():
+                return jsonify({
+                    "error": "Fan configuration switching requires administrator privileges",
+                    "details": "Please run MyLocalAPI as administrator to enable fan config switching",
+                    "admin_required": True
+                }), 403
+            
             name = request.args.get('name')
             percent_str = request.args.get('percent')
             
             try:
                 if name:
                     result = self.fan_controller.set_fan_profile(name)
-                    if result["ok"]:
-                        # Restart with config for immediate effect
-                        config_path = result["config"]
-                        restart_success = self.fan_controller.restart_with_config(config_path)
-                        result["restarted"] = restart_success
                     return jsonify(result)
                 
                 elif percent_str:
@@ -315,11 +636,6 @@ class FlaskServer:
                         return jsonify({"error": "Percent must be 0-100"}), 400
                     
                     result = self.fan_controller.set_fan_percentage(percent)
-                    if result["ok"]:
-                        # Restart with config for immediate effect
-                        config_path = result["config"]
-                        restart_success = self.fan_controller.restart_with_config(config_path)
-                        result["restarted"] = restart_success
                     return jsonify(result)
                 
                 else:
@@ -494,7 +810,8 @@ class FlaskServer:
                     "ok": True,
                     "audio": {"enabled": False, "status": "disabled"},
                     "fan": {"enabled": False, "status": "disabled"},
-                    "streaming": {"enabled": True}
+                    "streaming": {"enabled": True},
+                    "gaming": {"enabled": False, "status": "disabled"}
                 }
                 
                 # Audio diagnostics
@@ -520,6 +837,15 @@ class FlaskServer:
                     browser_test = self.streaming_controller.test_browsers()
                     diag["streaming"]["status"] = browser_test
                 
+                # Gaming diagnostics  
+                if self.settings_manager.get_setting('gaming.enabled', True):
+                    diag["gaming"]["enabled"] = True
+                    if self.gaming_controller:
+                        gaming_test = self.gaming_controller.test_gaming_system()
+                        diag["gaming"]["status"] = gaming_test
+                    else:
+                        diag["gaming"]["status"] = {"error": "Controller not initialized"}
+                
                 return jsonify({"ok": True, "diagnostics": diag})
                 
             except Exception as e:
@@ -535,7 +861,7 @@ class FlaskServer:
             port = self.settings_manager.get_setting('port', 1482)
             
             # Create server
-            self.server = make_server('127.0.0.1', port, self.app, threaded=True)
+            self.server = make_server('0.0.0.0', port, self.app, threaded=True)
             
             # Start server in thread
             self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
