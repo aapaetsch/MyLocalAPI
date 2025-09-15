@@ -1,9 +1,9 @@
 # My MyLocalAPI
 
-Author: Aidan Paetsch
-Date: 2025-09-15
-License: See LICENSE (GNU GPL v3.0)
-Disclaimer: Provided AS IS. See README.md 'AS IS Disclaimer' for details.
+- Author: Aidan Paetsch
+- Date: 2025-09-15
+- License: See LICENSE (GNU GPL v3.0)
+- Disclaimer: Provided AS IS. See README.md 'AS IS Disclaimer' for details.
 
 **MyLocalAPI** is a lightweight local HTTP server for Windows PC control. It provides REST endpoints for switching audio outputs, controlling volume, launching streaming services, and managing fan control profiles. The application features a system tray icon and a Tkinter GUI for configuration.
 
