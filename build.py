@@ -2,6 +2,11 @@
 """
 Build script for MyLocalAPI
 Automates the packaging process with PyInstaller and dependency bundling
+
+Author: Aidan Paetsch
+Date: 2025-09-15
+License: See LICENSE
+Disclaimer: Provided AS IS. See LICENSE for details.
 """
 
 import os
@@ -158,8 +163,15 @@ VSVersionInfo(
     
     def create_icon(self):
         """Create application icon"""
-        print("🎨 Creating application icon...")
+        print("🎨 Checking application icon...")
         
+        # Use existing icon if available
+        existing_icon = self.project_root / 'MyLocalAPI_app_icon_new.ico'
+        if existing_icon.exists():
+            print("✓ Using existing application icon")
+            return existing_icon
+        
+        print("⚠️  Creating fallback icon...")
         try:
             from PIL import Image, ImageDraw
             
@@ -172,22 +184,28 @@ VSVersionInfo(
             # Blue circle background
             draw.ellipse([8, 8, 56, 56], fill=(0, 120, 215, 255), outline=(0, 90, 180, 255), width=2)
             
-            # White "M" for MyLocalAPI
-            draw.text((22, 18), "M", fill=(255, 255, 255, 255), anchor="mm")
+            # White "M" for MyLocalAPI  
+            try:
+                from PIL import ImageFont
+                font = ImageFont.load_default()
+                draw.text((32, 32), "M", fill=(255, 255, 255, 255), anchor="mm", font=font)
+            except:
+                # Fallback without font
+                draw.text((26, 22), "M", fill=(255, 255, 255, 255))
             
             # Save as ICO file
             icon_path = self.project_root / 'icon.ico'
             image.save(icon_path, format='ICO', sizes=[(16, 16), (32, 32), (48, 48), (64, 64)])
             
-            print("✓ Application icon created")
+            print("✓ Fallback application icon created")
             return icon_path
             
         except ImportError:
-            print("⚠️  Pillow not available for icon creation, skipping...")
-            return None
+            print("⚠️  Pillow not available for icon creation, using existing icon")
+            return existing_icon if existing_icon.exists() else None
         except Exception as e:
             print(f"⚠️  Could not create icon: {e}")
-            return None
+            return existing_icon if existing_icon.exists() else None
     
     def build_executable(self, build_type='onefile'):
         """Build executable using PyInstaller"""
@@ -213,7 +231,10 @@ VSVersionInfo(
             args.extend(['--add-data', f'{self.scripts_dir};scripts'])
         
         # Add icon if available
-        icon_path = self.project_root / 'icon.ico'
+        icon_path = self.project_root / 'MyLocalAPI_app_icon_new.ico'
+        if not icon_path.exists():
+            icon_path = self.project_root / 'icon.ico'
+        
         if icon_path.exists():
             args.extend(['--icon', str(icon_path)])
         
