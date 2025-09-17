@@ -4,7 +4,7 @@
     "enabled_setting": "audio.enabled",
     "endpoints": [
       {
-        "path": "/switch",
+        "path": "/audio/device/switch",
         "method": "GET",
         "params": "key=<label>&token=<token> OR id=<device_id>&token=<token>",
         "description": "Switch default audio device",
@@ -25,10 +25,31 @@
         "test_params": ""
       },
       {
-        "path": "/device/current",
+        "path": "/audio/device/current",
         "method": "GET",
         "params": "token=<token>",
         "description": "Get current default device info",
+        "test_params": ""
+      },
+      {
+        "path": "/audio/devices",
+        "method": "GET",
+        "params": "token=<token>",
+        "description": "Get list of playback audio devices",
+        "test_params": ""
+      },
+      {
+        "path": "/audio/set_default",
+        "method": "POST",
+        "params": "JSON body { \"device_id\" or \"device_name\" } & token in query",
+        "description": "Set default audio device via POST JSON payload",
+        "test_params": "{ \"device_id\": \"<device_id>\" }"
+      },
+      {
+        "path": "/audio/current",
+        "method": "GET",
+        "params": "token=<token>",
+        "description": "Get current audio device and volume",
         "test_params": ""
       },
       {
@@ -45,11 +66,11 @@
     "enabled_setting": "streaming.launch_streaming_by_endpoint",
     "endpoints": [
       {
-        "path": "/openStreaming",
+        "path": "/streaming/launch",
         "method": "GET",
-        "params": "service=<youtube|crunchyroll|netflix|disney|prime|appletv>&token=<token>",
-        "description": "Launch streaming service and switch audio",
-        "test_params": "service=youtube"
+        "params": "service=<youtube|crunchyroll|netflix|disney|prime|appletv>&token=<token>&showID=<optional>",
+        "description": "Alternative endpoint to launch streaming service. If `showID` is provided, supported services will open the show's info/detail page (Netflix, Prime, Crunchyroll).",
+        "test_params": "service=netflix&showID=81287311"
       }
     ]
   },
@@ -58,11 +79,25 @@
     "enabled_setting": "gaming.enabled",
     "endpoints": [
       {
-        "path": "/launchGame",
+        "path": "/gaming/launch",
         "method": "GET",
         "params": "label=<game_label>&token=<token> OR steamid=<steam_app_id>&token=<token> OR path=<exe_path>&token=<token>",
         "description": "Launch a game by label, Steam App ID, or executable path",
         "test_params": "label=Example Game"
+      },
+      {
+        "path": "/gaming/games",
+        "method": "GET",
+        "params": "token=<token>",
+        "description": "Get list of configured games",
+        "test_params": ""
+      },
+      {
+        "path": "/gaming/games",
+        "method": "POST",
+        "params": "label=<label>&steam_appid=<steam_appid>&token=<token> OR exe_path=<path>&token=<token>",
+        "description": "Add a new game mapping (provide label and at least one of steam_appid or exe_path)",
+        "test_params": "label=New Game&steam_appid=12345"
       }
     ]
   },
@@ -118,6 +153,14 @@
         "description": "Get diagnostic information",
         "test_params": ""
       }
+          ,
+          {
+            "path": "/health",
+            "method": "GET",
+            "params": "token=<token>",
+            "description": "Health check endpoint — service status and version",
+            "test_params": ""
+          }
     ]
   }
 ]
