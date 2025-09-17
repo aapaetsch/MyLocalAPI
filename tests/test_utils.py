@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-import utils
+import utils as utils
 
 
 def test_get_app_data_dir_windows(monkeypatch, tmp_path):

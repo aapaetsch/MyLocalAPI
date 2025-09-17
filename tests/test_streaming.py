@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-import streaming
+import streaming as streaming
 
 
 class DummyPopen:
