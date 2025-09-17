@@ -58,15 +58,21 @@ class MyLocalAPIBuilder:
         else:
             print("✓ Running in virtual environment")
         
-        required_packages = [
-            'Flask', 'Flask-Cors', 'pystray', 'Pillow', 'requests', 
-            'psutil', 'pyinstaller'
-        ]
-        
+        # Map pip package names to their canonical import names
+        package_import_map = {
+            'Flask': 'flask',
+            'Flask-Cors': 'flask_cors',
+            'pystray': 'pystray',
+            'Pillow': 'PIL',
+            'requests': 'requests',
+            'psutil': 'psutil',
+            'pyinstaller': 'PyInstaller'
+        }
+
         missing_packages = []
-        for package in required_packages:
+        for package, import_name in package_import_map.items():
             try:
-                __import__(package.lower().replace('-', '_'))
+                __import__(import_name)
             except ImportError:
                 missing_packages.append(package)
         
@@ -123,41 +129,43 @@ class MyLocalAPIBuilder:
     
     def create_version_info(self):
         """Create version info file for Windows executable"""
+        # Version set to 1.0.4 for this release
         version_content = '''# UTF-8
 #
 VSVersionInfo(
-  ffi=FixedFileInfo(
-    filevers=(1, 0, 0, 0),
-    prodvers=(1, 0, 0, 0),
-    mask=0x3f,
-    flags=0x0,
-    OS=0x40004,
-    fileType=0x1,
-    subtype=0x0,
-    date=(0, 0)
-  ),
-  kids=[
-    StringFileInfo(
-      [
-        StringTable(
-          u'040904B0',
-          [StringStruct(u'CompanyName', u'MyLocalAPI'),
-           StringStruct(u'FileDescription', u'Local HTTP server for PC control'),
-           StringStruct(u'FileVersion', u'1.0.0.0'),
-           StringStruct(u'InternalName', u'MyLocalAPI'),
-           StringStruct(u'LegalCopyright', u'Copyright (C) 2024'),
-           StringStruct(u'OriginalFilename', u'MyLocalAPI.exe'),
-           StringStruct(u'ProductName', u'MyLocalAPI'),
-           StringStruct(u'ProductVersion', u'1.0.0.0')])
-      ]), 
-    VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
-  ]
+    ffi=FixedFileInfo(
+        filevers=(1, 0, 4, 0),
+        prodvers=(1, 0, 4, 0),
+        mask=0x3f,
+        flags=0x0,
+        OS=0x40004,
+        fileType=0x1,
+        subtype=0x0,
+        date=(0, 0)
+    ),
+    kids=[
+        StringFileInfo(
+            [
+                StringTable(
+                    u'040904B0',
+                    [StringStruct(u'CompanyName', u'MyLocalAPI'),
+                     StringStruct(u'FileDescription', u'Local HTTP server for PC control'),
+                     StringStruct(u'FileVersion', u'1.0.4.0'),
+                     StringStruct(u'InternalName', u'MyLocalAPI'),
+                     StringStruct(u'LegalCopyright', u'Copyright (C) 2024'),
+                     StringStruct(u'OriginalFilename', u'MyLocalAPI.exe'),
+                     StringStruct(u'ProductName', u'MyLocalAPI'),
+                     StringStruct(u'ProductVersion', u'1.0.4.0')])
+            ]), 
+        VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
+    ]
 )
 '''
+
         version_file = self.project_root / 'version_info.py'
         with open(version_file, 'w', encoding='utf-8') as f:
-            f.write(version_content)
-        
+                f.write(version_content)
+
         print("✓ Version info file created")
         return version_file
     
@@ -170,8 +178,9 @@ VSVersionInfo(
             print("✓ Using existing application icon")
             return existing_icon
         
-        print(f"⚠️  Could not create icon: {e}")
-        return existing_icon if existing_icon.exists() else None
+        # Could not find or create an icon - return None
+        print("⚠️  Could not find or create an application icon")
+        return None
     
     def build_executable(self, build_type='onefile'):
         """Build executable using PyInstaller"""
@@ -199,6 +208,17 @@ VSVersionInfo(
         
         if icon_path.exists():
             args.extend(['--icon', str(icon_path)])
+            # Also bundle the icon file into the onefile archive so it is
+            # available at runtime via sys._MEIPASS. This is required when
+            # using --onefile so runtime code can load the icon (e.g. for
+            # tkinter.root.iconbitmap or pystray).
+            args.extend(['--add-data', f'{str(icon_path)};.'])
+
+        # Ensure the produced executable has a consistent name (match spec)
+        # Without this, PyInstaller defaults to the script basename (main.exe)
+        # and the packaging step then copies/renames it to MyLocalAPI.exe which
+        # results in both main.exe and MyLocalAPI.exe appearing in dist/.
+        args.extend(['--name', 'MyLocalAPI'])
         
         version_file = self.project_root / 'version_info.py'
         if version_file.exists():
@@ -206,8 +226,7 @@ VSVersionInfo(
         
         excludes = [
             'matplotlib', 'numpy', 'scipy', 'pandas', 'jupyter',
-            'notebook', 'IPython', 'test', 'tests', 'unittest',
-            'email', 'http.server', 'urllib.request', 'xml.etree'
+            'notebook', 'IPython', 'test', 'tests', 'unittest', 'xml.etree'
         ]
         
         for exclude in excludes:

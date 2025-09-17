@@ -12,6 +12,7 @@ Disclaimer: Provided AS IS. See README.md 'AS IS Disclaimer' for details.
 import json
 import os
 import logging
+import copy
 from typing import Any, Dict, List, Optional
 from utils import get_app_data_dir
 
@@ -86,15 +87,15 @@ class SettingsManager:
                     loaded_settings = json.load(f)
                 
                 # Merge with defaults to ensure all keys exist
-                settings = self._deep_merge(self.DEFAULT_SETTINGS.copy(), loaded_settings)
+                settings = self._deep_merge(copy.deepcopy(self.DEFAULT_SETTINGS), loaded_settings)
                 logger.info(f"Loaded settings from {self.settings_file}")
                 return settings
             else:
                 logger.info("Settings file not found, using defaults")
-                return self.DEFAULT_SETTINGS.copy()
+                return copy.deepcopy(self.DEFAULT_SETTINGS)
         except (json.JSONDecodeError, IOError) as e:
             logger.error(f"Error loading settings: {e}, using defaults")
-            return self.DEFAULT_SETTINGS.copy()
+            return copy.deepcopy(self.DEFAULT_SETTINGS)
     
     def _deep_merge(self, base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
         """Deep merge two dictionaries"""
@@ -267,7 +268,7 @@ class SettingsManager:
     
     def reset_to_defaults(self) -> bool:
         """Reset all settings to defaults"""
-        self.settings = self.DEFAULT_SETTINGS.copy()
+        self.settings = copy.deepcopy(self.DEFAULT_SETTINGS)
         return self.save_settings()
     
     def export_settings(self, filepath: str) -> bool:
@@ -287,7 +288,7 @@ class SettingsManager:
                 imported_settings = json.load(f)
             
             # Merge with defaults and validate
-            self.settings = self._deep_merge(self.DEFAULT_SETTINGS.copy(), imported_settings)
+            self.settings = self._deep_merge(copy.deepcopy(self.DEFAULT_SETTINGS), imported_settings)
             return self.save_settings()
         except (json.JSONDecodeError, IOError) as e:
             logger.error(f"Error importing settings: {e}")

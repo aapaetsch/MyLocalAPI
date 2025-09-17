@@ -277,15 +277,29 @@ def run_subprocess_safe(cmd: List[str], timeout: int = 30,
 
 def find_bundled_executable(exe_name: str) -> Optional[str]:
     """Find bundled executable in various common locations"""
-    # Check if running as PyInstaller bundle
+    # Check if running as PyInstaller bundle and search the temporary
+    # extraction directory (_MEIPASS) including common subfolders.
     if getattr(sys, 'frozen', False):
-        bundle_dir = sys._MEIPASS
-        exe_path = os.path.join(bundle_dir, exe_name)
-        if os.path.exists(exe_path):
-            return exe_path
+        bundle_dir = getattr(sys, '_MEIPASS', None)
+        if bundle_dir:
+            # Candidate locations inside the extracted bundle
+            candidates = [
+                os.path.join(bundle_dir, exe_name),
+                os.path.join(bundle_dir, 'scripts', exe_name),
+                os.path.join(bundle_dir, 'svcl-x64', exe_name),
+                os.path.join(bundle_dir, 'scripts', 'svcl-x64', exe_name),
+                os.path.join(bundle_dir, 'bin', exe_name),
+                os.path.join(bundle_dir, 'tools', exe_name),
+            ]
+            for exe_path in candidates:
+                if os.path.exists(exe_path):
+                    return exe_path
     
-    # Check script directory and subdirectories
-    if hasattr(sys, 'frozen'):
+    # Check script directory and subdirectories (development or on-disk install)
+    if getattr(sys, 'frozen', False):
+        # When bundled in onefile, resources are inside _MEIPASS; however
+        # some users may install the onefile next to a sibling 'scripts' dir
+        # so also check the executable directory as a fallback.
         base_dir = os.path.dirname(sys.executable)
     else:
         base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -513,3 +527,148 @@ def clean_audio_device_id(device_id: Optional[str]) -> str:
         return match.group(1)
 
     return device_id.strip()
+
+
+def _get_desktop_path() -> str:
+    """Return the current user's desktop path on Windows or a reasonable fallback."""
+    try:
+        if sys.platform == 'win32':
+            from pathlib import Path
+            return str(Path(os.path.join(os.environ.get('USERPROFILE', ''), 'Desktop')))
+        else:
+            return os.path.join(os.path.expanduser('~'), 'Desktop')
+    except Exception:
+        return os.path.join(os.path.expanduser('~'), 'Desktop')
+
+
+def create_desktop_shortcut(app_name: str, target: str, args: str = '', icon: Optional[str] = None, description: str = '') -> bool:
+    """Create a Windows .lnk desktop shortcut using win32com if available.
+
+    Falls back to creating a simple .url file if win32com is not present.
+    Returns True on success, False otherwise.
+    """
+    desktop = _get_desktop_path()
+    try:
+        os.makedirs(desktop, exist_ok=True)
+        shortcut_path = os.path.join(desktop, f"{app_name}.lnk")
+
+        try:
+            # Preferred method: win32com
+            from win32com.client import Dispatch
+            shell = Dispatch('WScript.Shell')
+            shortcut = shell.CreateShortCut(shortcut_path)
+            shortcut.Targetpath = target
+            shortcut.Arguments = args or ''
+            shortcut.WorkingDirectory = os.path.dirname(target)
+            if icon and os.path.exists(icon):
+                shortcut.IconLocation = icon
+            if description:
+                shortcut.Description = description
+            shortcut.save()
+            return True
+        except Exception:
+            # Fallback: create a .url (internet shortcut) file that points to the exe
+            url_path = os.path.join(desktop, f"{app_name}.url")
+            try:
+                with open(url_path, 'w', encoding='utf-8') as fh:
+                    fh.write('[InternetShortcut]\n')
+                    # file URI scheme - point to the exe path
+                    fh.write('URL=file:///' + target.replace('\\', '/') + '\n')
+                    if icon and os.path.exists(icon):
+                        fh.write('IconFile=' + icon + '\n')
+                return True
+            except Exception:
+                return False
+
+    except Exception:
+        return False
+
+
+def prompt_create_desktop_shortcut(app_name: str = 'MyLocalAPI', target: Optional[str] = None, icon: Optional[str] = None, description: str = '') -> bool:
+    """Prompt the user (first-run) to create a desktop shortcut.
+
+    Creates a marker file in the app data dir so the prompt is only shown once.
+    Returns True if a shortcut was created, False otherwise.
+    """
+    try:
+        marker = os.path.join(get_app_data_dir(), 'first_run_shortcut_done')
+        if os.path.exists(marker):
+            return False
+
+        # Determine a sensible default target if not provided
+        if not target:
+            if getattr(sys, 'frozen', False):
+                # If running from a bundled exe, point the shortcut at the running exe
+                target = sys.executable
+            else:
+                # If running from source, prefer a packaged executable if present
+                try:
+                    from pathlib import Path
+                    proj_root = Path(__file__).parent.parent.resolve()
+                    # Common PyInstaller outputs:
+                    candidates = [
+                        proj_root / 'dist' / 'MyLocalAPI.exe',
+                        proj_root / 'dist' / 'MyLocalAPI' / 'MyLocalAPI.exe'
+                    ]
+
+                    # If none of the common candidates exist, search dist for any exe
+                    if not any(p.exists() for p in candidates):
+                        dist_dir = proj_root / 'dist'
+                        if dist_dir.exists():
+                            exes = list(dist_dir.rglob('*.exe'))
+                            preferred = None
+                            for e in exes:
+                                if e.name.lower().startswith('mylocalapi'):
+                                    preferred = e
+                                    break
+                            if preferred is None and exes:
+                                preferred = exes[0]
+                            if preferred:
+                                candidates = [preferred]
+
+                    # Pick the first existing candidate
+                    for p in candidates:
+                        if p and p.exists():
+                            target = str(p)
+                            break
+                except Exception:
+                    target = None
+
+                # Final fallback: the running script path
+                if not target:
+                    target = os.path.abspath(sys.argv[0])
+
+        # Attempt to prompt user with a simple Tk dialog
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+
+            root = tk.Tk()
+            root.withdraw()
+            resp = messagebox.askyesno('Create Desktop Shortcut', f"Create a desktop shortcut for {app_name}?")
+            root.destroy()
+            if not resp:
+                # Mark as shown to avoid prompting again
+                try:
+                    os.makedirs(os.path.dirname(marker), exist_ok=True)
+                    with open(marker, 'w') as fh:
+                        fh.write('no')
+                except Exception:
+                    pass
+                return False
+        except Exception:
+            # If GUI prompt fails, don't force creation
+            return False
+
+        success = create_desktop_shortcut(app_name, target, args='', icon=icon, description=description)
+
+        try:
+            os.makedirs(os.path.dirname(marker), exist_ok=True)
+            with open(marker, 'w') as fh:
+                fh.write('yes' if success else 'no')
+        except Exception:
+            pass
+
+        return success
+    except Exception:
+        return False

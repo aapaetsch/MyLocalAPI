@@ -33,6 +33,17 @@ from settings import SettingsManager
 from utils import get_app_data_dir, is_admin, setup_logging, check_and_elevate
 import logging
 
+
+def resource_path(*relative_parts):
+    """Return an absolute path to a resource bundled by PyInstaller.
+
+    When running as a onefile bundle PyInstaller extracts files to a
+    temporary folder referenced by sys._MEIPASS. When not bundled this
+    returns a path relative to the project source directory.
+    """
+    base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, *relative_parts)
+
 class MyLocalAPIApp:
     """Main application class that coordinates all components"""
     
@@ -73,10 +84,9 @@ class MyLocalAPIApp:
             ImageDraw = None
 
         # Prefer bundled tray icon files when available (ICO for Windows).
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        tray_ico = os.path.join(base_dir, 'MyLocalAPI_app_icon_new.ico')
-        tray_png = os.path.join(base_dir, 'mylocalapiappicon.png')
-        app_png = os.path.join(base_dir, 'mylocalapiappicon.png')
+        tray_ico = resource_path('MyLocalAPI_app_icon_new.ico')
+        tray_png = resource_path('mylocalapiappicon.png')
+        app_png = resource_path('mylocalapiappicon.png')
 
         image = None
         try:
@@ -392,6 +402,22 @@ def main():
     
     # Create and run application
     app = MyLocalAPIApp()
+
+    # First-run: prompt to create desktop shortcut (non-blocking, safe)
+    try:
+        from utils import prompt_create_desktop_shortcut, resource_path as _rp
+        try:
+            icon = _rp('MyLocalAPI_app_icon_new.ico') if hasattr(_rp, '__call__') else None
+        except Exception:
+            icon = None
+
+        try:
+            # Only prompt when running interactively (not when running tests)
+            prompt_create_desktop_shortcut(app_name='MyLocalAPI', target=None, icon=icon)
+        except Exception:
+            pass
+    except Exception:
+        pass
     app.run()
 
 if __name__ == '__main__':

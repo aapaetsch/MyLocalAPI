@@ -34,6 +34,12 @@ env.bak/
 dist/*.exe
 build/*.exe
 
+# Release artifacts
+release/
+release/staging/
+release/zips/
+*.zip
+
 # IDEs and editors
 .vscode/
 .idea/
@@ -62,6 +68,9 @@ htmlcov/
 .env
 .env.*
 settings.json
+
+# Optional bundled third-party binaries (keep out of git; include in Release assets instead)
+scripts/svcl-x64/
 
 # Temporary files
 *.tmp

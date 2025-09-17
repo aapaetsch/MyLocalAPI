@@ -28,6 +28,16 @@ from settings import SettingsManager
 logger = logging.getLogger(__name__)
 
 
+def resource_path(*relative_parts):
+    """Return an absolute path to a resource bundled by PyInstaller.
+    Mirrors the helper in main.py so modules loaded independently can
+    still access bundled files under sys._MEIPASS when running as a
+    onefile executable.
+    """
+    base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, *relative_parts)
+
+
 class MainWindow:
     # Class-level default palette (can be overridden per-instance)
     APP_BG = "#1E1F2B"
@@ -137,12 +147,11 @@ class MainWindow:
 
         # Load icons (keep references on self to avoid GC) and ensure they're small
         try:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            icon_path = os.path.join(base_dir, 'mylocalapiappicon.png')
-            tray_path = os.path.join(base_dir, 'systemtrayicon.png')
+            icon_path = resource_path('mylocalapiappicon.png')
+            tray_path = resource_path('systemtrayicon.png')
             # Prefer bundled ICOs when available (Windows)
-            app_ico_path = os.path.join(base_dir, 'MyLocalAPI_app_icon_new.ico')
-            tray_ico_path = os.path.join(base_dir, 'MyLocalAPI_tray_icon_new.ico')
+            app_ico_path = resource_path('MyLocalAPI_app_icon_new.ico')
+            tray_ico_path = resource_path('MyLocalAPI_tray_icon_new.ico')
             self._app_ico_path = app_ico_path
             self._tray_ico_path = tray_ico_path
 
