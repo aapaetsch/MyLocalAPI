@@ -583,7 +583,6 @@ def create_desktop_shortcut(app_name: str, target: str, args: str = '', icon: Op
     except Exception:
         return False
 
-
 def prompt_create_desktop_shortcut(app_name: str = 'MyLocalAPI', target: Optional[str] = None, icon: Optional[str] = None, description: str = '') -> bool:
     """Prompt the user (first-run) to create a desktop shortcut.
 

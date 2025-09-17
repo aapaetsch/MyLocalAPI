@@ -16,7 +16,7 @@ import logging
 import subprocess
 import webbrowser
 from typing import Dict, Optional, List
-from utils import run_subprocess_safe
+from src.utils import run_subprocess_safe
 
 logger = logging.getLogger(__name__)
 
@@ -299,8 +299,12 @@ class StreamingController:
                 "error": f"Apple TV fallback failed: {str(e)}"
             }
     
-    def launch_service(self, service: str) -> Dict[str, any]:
-        """Launch a streaming service"""
+    def launch_service(self, service: str, show_id: Optional[str] = None) -> Dict[str, any]:
+        """Launch a streaming service.
+
+        If `show_id` is provided for supported services, build a direct URL to
+        the show's info/detail page (Netflix, Prime Video, Crunchyroll).
+        """
         service = service.lower().strip()
         
         if service not in self.SERVICES:
@@ -318,6 +322,24 @@ class StreamingController:
             
             # Browser-based services
             url = service_config["url"]
+
+            # If a show_id is provided, attempt to construct a direct show URL
+            # for known services. Keep the default `url` as a fallback.
+            if show_id:
+                try:
+                    sid = str(show_id).strip()
+                    if service == 'netflix' and sid:
+                        # Netflix title page
+                        url = f"https://www.netflix.com/title/{sid}"
+                    elif service == 'prime' and sid:
+                        # Prime Video detail page (region neutral path used in endpoints)
+                        url = f"https://www.primevideo.com/region/na/detail/{sid}"
+                    elif service == 'crunchyroll' and sid:
+                        # Crunchyroll series page
+                        url = f"https://www.crunchyroll.com/series/{sid}"
+                except Exception:
+                    # On any formatting error, fall back to the base URL
+                    url = service_config["url"]
             preferred_browser = service_config.get("browser", "default")
             
             if preferred_browser == "chrome":

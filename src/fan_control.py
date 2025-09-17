@@ -15,7 +15,7 @@ import logging
 import subprocess
 import psutil
 from typing import Dict, List, Optional, Any
-from utils import run_subprocess_safe, safe_kill_process_by_name, is_admin
+from src.utils import run_subprocess_safe, safe_kill_process_by_name, is_admin
 
 logger = logging.getLogger(__name__)
 
