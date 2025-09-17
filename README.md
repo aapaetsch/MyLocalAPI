@@ -124,6 +124,11 @@ curl "http://127.0.0.1:1482/streaming/launch?service=youtube&token=changeme"
 # Launch streaming service with showID (optional) — some services support direct title links
 curl "http://127.0.0.1:1482/streaming/launch?service=netflix&showID=81291930&token=changeme"
 
+# Launch a game (send the Steam AppID as the game id)
+curl -X POST "http://127.0.0.1:1482/gaming/launch?token=changeme" \
+  -H "Content-Type: application/json" \
+  -d '{"steamid": "570"}'
+
 # Apply fan profile
 curl -X POST "http://127.0.0.1:1482/fan/apply?token=changeme" \
   -H "Content-Type: application/json" \
