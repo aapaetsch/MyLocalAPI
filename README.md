@@ -72,7 +72,7 @@ MyLocalAPI now automatically detects when administrator privileges are needed an
 
 ### Basic Configuration
 
-1. **Set Port and Token**: Configure in the GUI (default: port 5000, token "changeme")
+1. **Set Port and Token**: Configure in the GUI (default: port 1482, token "changeme")
 2. **Gaming Setup**: Add games with labels, Steam AppID, and executable paths
 3. **Audio Mappings**: Add your audio devices with labels (e.g., "headphones", "speakers")  
 4. **Fan Control**: Set FanControl.exe path and configuration directory
@@ -95,34 +95,37 @@ See `NETWORK_SETUP.md` for detailed network configuration instructions.
 
 ```bash
 # Health check
-curl "http://127.0.0.1:5000/health"
+curl "http://127.0.0.1:1482/health"
 
 # Launch a game 
-curl -X POST "http://127.0.0.1:5000/gaming/launch?token=changeme" \
+curl -X POST "http://127.0.0.1:1482/gaming/launch?token=changeme" \
   -H "Content-Type: application/json" \
   -d '{"game_id": "steam_game_1"}'
-
+```
 ### API Usage
 
 Once started, the server provides REST endpoints:
 
 ```bash
 # Switch to headphones
-curl "http://127.0.0.1:5000/audio/set_default?token=changeme" \
+curl "http://127.0.0.1:1482/audio/set_default?token=changeme" \
   -H "Content-Type: application/json" \
   -d '{"device_name": "Headphones"}'
 
 # Set volume to 50%
-curl "http://127.0.0.1:5000/audio/volume?percent=50&token=changeme"
+curl "http://127.0.0.1:1482/audio/volume?percent=50&token=changeme"
 
 # Get current device and volume
-curl "http://127.0.0.1:5000/audio/current?token=changeme"
+curl "http://127.0.0.1:1482/audio/current?token=changeme"
 
 # Launch streaming service (switches to streaming device if configured)
-curl "http://127.0.0.1:5000/streaming/launch?service=youtube&token=changeme"
+curl "http://127.0.0.1:1482/streaming/launch?service=youtube&token=changeme"
+
+# Launch streaming service with showID (optional) — some services support direct title links
+curl "http://127.0.0.1:1482/streaming/launch?service=netflix&showID=81291930&token=changeme"
 
 # Apply fan profile
-curl -X POST "http://127.0.0.1:5000/fan/apply?token=changeme" \
+curl -X POST "http://127.0.0.1:1482/fan/apply?token=changeme" \
   -H "Content-Type: application/json" \
   -d '{"profile": "gaming"}'
 ```
@@ -175,8 +178,7 @@ Supported services:
 All endpoints require a `token` parameter matching the configured token.
 
 ### Audio Endpoints
-
-#### `GET /switch`
+#### `GET /audio/device/switch`
 Switch default audio device.
 - `key`: Device label from mappings, OR
 - `id`: Direct device ID (Command-Line Friendly ID)
@@ -191,7 +193,7 @@ Set system volume percentage.
 Get current volume and device information.
 - `token`: API token
 
-#### `GET /device/current` 
+#### `GET /audio/device/current` 
 Get current default audio device details.
 - `token`: API token
 
@@ -199,11 +201,17 @@ Get current default audio device details.
 List all available playback devices.
 - `token`: API token
 
+#### `POST /audio/set_default`
+Set default audio device via POST JSON payload. Provide either `device_id` or `device_name` in JSON body and include `token` in query string.
+- Body: `{ "device_id": "<device_id>" }`
+- `token`: API token (query)
+
 ### Streaming Endpoints
 
-#### `GET /openStreaming`
+#### `GET /streaming/launch`
 Launch streaming service and switch to streaming audio device (if configured).
 - `service`: One of `youtube|crunchyroll|netflix|disney|prime|appletv`
+- `showID` (optional): Service-specific show/title identifier; when provided, supported services will open the show's info/detail page (Netflix, Prime Video, Crunchyroll).
 - `token`: API token
 
 ### Fan Control Endpoints
