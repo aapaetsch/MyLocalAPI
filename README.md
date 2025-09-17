@@ -275,7 +275,7 @@ For a professional installer:
 ; Example Inno Setup script
 [Setup]
 AppName=MyLocalAPI
-AppVersion=1.0
+AppVersion=1.0.3
 DefaultDirName={pf}\MyLocalAPI
 DefaultGroupName=MyLocalAPI
 OutputBaseFilename=MyLocalAPI-Setup

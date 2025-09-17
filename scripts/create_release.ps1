@@ -50,8 +50,14 @@ try {
 
     # Ensure source paths are full
     $SourceDir = (Resolve-Path $SourceDir).Path
-    $OutDir = (Resolve-Path -LiteralPath $OutDir -ErrorAction SilentlyContinue)?.Path
-    if (-not $OutDir) { New-Item -ItemType Directory -Path (Join-Path $SourceDir 'release') -Force | Out-Null; $OutDir = (Resolve-Path (Join-Path $SourceDir 'release')).Path }
+    # Resolve OutDir in a way compatible with PowerShell 5.1 (avoid null-conditional operator)
+    $resolvedOut = Resolve-Path -LiteralPath $OutDir -ErrorAction SilentlyContinue
+    if ($resolvedOut) {
+        $OutDir = $resolvedOut.Path
+    } else {
+        New-Item -ItemType Directory -Path (Join-Path $SourceDir 'release') -Force | Out-Null
+        $OutDir = (Resolve-Path (Join-Path $SourceDir 'release')).Path
+    }
 
     # Prepare staging folder
     $staging = Join-Path $OutDir 'staging'
@@ -103,7 +109,10 @@ try {
     }
 
     $zipName = "MyLocalAPI-$tag.zip"
-    $zipPath = Join-Path $SourceDir $zipName
+    # Place release zips under the OutDir in a 'zips' subfolder to keep repository root clean
+    $zipsDir = Join-Path $OutDir 'zips'
+    if (-not (Test-Path $zipsDir)) { New-Item -ItemType Directory -Path $zipsDir | Out-Null }
+    $zipPath = Join-Path $zipsDir $zipName
 
     if ((Test-Path $zipPath) -and -not $Overwrite) {
         Write-Error "Target zip already exists: $zipPath. Use -Overwrite to replace it."; exit 3
