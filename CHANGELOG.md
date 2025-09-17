@@ -2,6 +2,48 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.4] - 2025-09-17
+### Launched
+- The following changes have been released in version 1.0.4:
+### Added
+- POST /gaming/games endpoint to add new game mappings (assigns UUID id and persists via SettingsManager).
+
+### Changed
+- Health endpoint (`/health`) now reports the package application version (from `src.__version__`) instead of a hardcoded value.
+- `static/endpoints.json` synchronized with implemented server endpoints:
+  - Added Gaming Management entries (GET/POST `/gaming/games`, POST `/gaming/launch`).
+  - Added audio-specific endpoints (`/audio/devices`, `/audio/set_default`, `/audio/current`) and aliases.
+  - Added `/health` to the System group so the GUI displays the health endpoint.
+  - Ensured all auth-protected endpoints include `token=<token>` in their `params` field.
+ - Improved CTk theme loading in the GUI: theme lookup now prefers bundled `assets/themes/` (via `resource_path`) and falls back to a programmatic theme object when files are missing; added debug logging around theme application to aid troubleshooting.
+
+### Fixed
+- GUI endpoints loader updated to use `resource_path('static','endpoints.json')` so the Endpoints tab loads correctly from both dev and PyInstaller onefile builds.
+ - Make resource lookups more resilient for one-file builds: theme and static file resolution now uses the same `resource_path` strategy so packaged assets (themes, `static/endpoints.json`) are discovered reliably at runtime.
+
+### Verification
+- Ran import checks for modified modules and a headless server smoke test that confirmed `/health` returns the package version.
+- Ran a validation script to confirm every `@self._require_auth` route is present in `static/endpoints.json` and includes `token` in params.
+
+### Notes
+- A small validator script was added at `tools/validate_endpoints_auth.py` to assist in verifying consistency between `src/server.py` and `static/endpoints.json`.
+
+### Files touched in this change
+- `src/server.py` — health endpoint updated to use package version; POST `/gaming/games` added; other minor controller wiring updates.
+- `src/gui.py` — endpoints loader updated to use `resource_path` (previously changed in session).
+- `static/endpoints.json` — synchronized with server: added audio endpoints, gaming management, `/streaming/launch`, `/switch` alias, `/health` entry, and ensured token param presence for auth-protected routes.
+- `tools/validate_endpoints_auth.py` — validation helper (added for verification).
+
+### Added
+- Optional `showID` query parameter for streaming launch endpoints (`/streaming/launch`, `/openStreaming`). When provided, supported services will open the show's info/detail page directly (Netflix, Prime Video, Crunchyroll). The server forwards `showID` to `StreamingController.launch_service(service, show_id)` and the controller constructs service-specific URLs (e.g., `https://www.netflix.com/title/{showID}`).
+
+### Changed
+- `StreamingController` updated to accept an optional `show_id` parameter and to construct service-specific deep links when `showID` is provided (Netflix, Prime Video, Crunchyroll). This improves launch behavior for services that support direct title links and is documented in `static/endpoints.json`.
+
+### Verification
+- Updated `static/endpoints.json` to document the optional `showID` parameter for `/streaming/launch` and ran import smoke-tests for modified modules.
+
+
 ## [0.1.0] - 2025-09-15
 ### Added
 - Local HTTP API server (Flask) with endpoints for:
