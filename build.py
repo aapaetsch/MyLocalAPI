@@ -202,7 +202,17 @@ VSVersionInfo(
         if self.scripts_dir.exists():
             args.extend(['--add-data', f'{self.scripts_dir};scripts'])
         
-        icon_path = self.project_root / 'MyLocalAPI_app_icon_new.ico'
+        # Add assets directory
+        assets_dir = self.project_root / 'assets'
+        if assets_dir.exists():
+            args.extend(['--add-data', f'{assets_dir};assets'])
+        
+        # Add static directory
+        static_dir = self.project_root / 'static'
+        if static_dir.exists():
+            args.extend(['--add-data', f'{static_dir};static'])
+        
+        icon_path = self.project_root / 'assets' / 'images' / 'MyLocalAPI_app_icon_new.ico'
         if not icon_path.exists():
             icon_path = self.project_root / 'icon.ico'
         
@@ -234,13 +244,18 @@ VSVersionInfo(
         
         hidden_imports = [
             'win32gui', 'win32con', 'win32process', 'win32com.shell',
-            'pystray._win32', 'PIL._tkinter_finder', 'psutil'
+            'pystray._win32', 'PIL._tkinter_finder', 'psutil',
+            'src.server', 'src.gui', 'src.audio_control', 'src.settings',
+            'src.utils', 'src.streaming', 'src.fan_control', 'src.gaming_control'
         ]
         
         for hidden in hidden_imports:
             args.extend(['--hidden-import', hidden])
         
-        args.append('main.py')
+        # Add src to Python path
+        args.extend(['--paths', str(self.project_root / 'src')])
+        
+        args.append('src/main.py')
         
         try:
             print(f"Running: {' '.join(args)}")
