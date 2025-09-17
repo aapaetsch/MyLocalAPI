@@ -38,7 +38,6 @@ build/*.exe
 release/
 release/staging/
 release/zips/
-*.zip
 
 # IDEs and editors
 .vscode/
