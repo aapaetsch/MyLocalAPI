@@ -14,7 +14,7 @@ import os
 import logging
 import copy
 from typing import Any, Dict, List, Optional
-from utils import get_app_data_dir
+from src.utils import get_app_data_dir
 
 logger = logging.getLogger(__name__)
 

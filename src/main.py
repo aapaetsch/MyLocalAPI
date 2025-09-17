@@ -65,7 +65,7 @@ class MyLocalAPIApp:
         try:
             if sys.platform == 'win32':
                 try:
-                    APPID = 'com.aapaetsch.mylocalapi'
+                    APPID = 'com.mylocalapi'
                     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APPID)
                 except Exception:
                     pass
@@ -405,7 +405,7 @@ def main():
 
     # First-run: prompt to create desktop shortcut (non-blocking, safe)
     try:
-        from src.utils import prompt_create_desktop_shortcut, resource_path as _rp
+        from .utils import prompt_create_desktop_shortcut, resource_path as _rp
         try:
             icon = _rp('MyLocalAPI_app_icon_new.ico') if hasattr(_rp, '__call__') else None
         except Exception:

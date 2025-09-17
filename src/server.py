@@ -17,11 +17,13 @@ from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 from werkzeug.serving import make_server
 
-from settings import SettingsManager
-from audio_control import AudioController
-from streaming import StreamingController
-from fan_control import FanController
-from gaming_control import GamingController
+from src.settings import SettingsManager
+from src.audio_control import AudioController
+from src.streaming import StreamingController
+from src.fan_control import FanController
+from src.gaming_control import GamingController
+import uuid
+from src import __version__ as APP_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -97,8 +99,8 @@ class FlaskServer:
                 "service": "MyLocalAPI",
                 "status": "running",
                 "endpoints": [
-                    "/switch", "/volume", "/volume/current", "/device/current",
-                    "/openStreaming", "/launchGame", "/gaming/games", "/gaming/launch",
+                    "/audio/device/switch", "/volume", "/volume/current", "/audio/device/current",
+                    "/streaming/launch", "/gaming/games", "/gaming/launch",
                     "/fan/apply", "/fan/refresh", "/fan/configs", "/fan/status", 
                     "/list", "/status", "/diag", "/health"
                 ]
@@ -110,10 +112,10 @@ class FlaskServer:
             return jsonify({
                 "status": "healthy",
                 "service": "MyLocalAPI",
-                "version": "1.0.0"
+                "version": APP_VERSION
             })
         
-        @self.app.route('/switch', methods=['GET'])
+        @self.app.route('/audio/device/switch', methods=['GET'])
         @self._require_auth
         def switch_device():
             """Switch audio device"""
@@ -149,7 +151,7 @@ class FlaskServer:
                     return jsonify({"error": "Missing 'key' or 'id' parameter"}), 400
                     
             except Exception as e:
-                logger.error(f"Error in /switch: {e}")
+                logger.error(f"Error in /audio/device/switch: {e}")
                 return jsonify({"error": str(e)}), 500
         
         @self.app.route('/volume', methods=['GET'])
@@ -220,7 +222,7 @@ class FlaskServer:
                 logger.error(f"Error in /volume/current: {e}")
                 return jsonify({"error": str(e)}), 500
         
-        @self.app.route('/device/current', methods=['GET'])
+        @self.app.route('/audio/device/current', methods=['GET'])
         @self._require_auth
         def get_current_device():
             """Get current default device"""
@@ -254,7 +256,7 @@ class FlaskServer:
                     }), 500
                     
             except Exception as e:
-                logger.error(f"Error in /device/current: {e}")
+                logger.error(f"Error in /audio/device/current: {e}")
                 return jsonify({"error": str(e)}), 500
         
         # Additional audio endpoints
@@ -390,9 +392,10 @@ class FlaskServer:
                         except Exception as e:
                             logger.warning(f"Failed to apply fan config: {e}")
                 
-                # Launch streaming service
+                # Launch streaming service (accept optional showID to open direct show pages)
+                show_id = request.args.get('showID') or request.args.get('showId') or request.args.get('show')
                 if self.streaming_controller:
-                    result = self.streaming_controller.launch_service(service)
+                    result = self.streaming_controller.launch_service(service, show_id)
                     if result["ok"]:
                         return jsonify(result)
                     else:
@@ -418,10 +421,10 @@ class FlaskServer:
             if not service:
                 return jsonify({"error": "Missing 'service' parameter"}), 400
             
-            # Delegate to the existing openStreaming logic
+            # Delegate to the existing openStreaming logic (open_streaming reads showID itself)
             return open_streaming()
         
-        @self.app.route('/launchGame', methods=['GET'])
+        @self.app.route('/gaming/launch', methods=['GET'])
         @self._require_auth
         def launch_game():
             """Launch a game"""
@@ -498,7 +501,7 @@ class FlaskServer:
                     return jsonify({"error": result["error"]}), 500
                     
             except Exception as e:
-                logger.error(f"Error in /launchGame: {e}")
+                logger.error(f"Error in /gaming/launch: {e}")
                 return jsonify({"error": str(e)}), 500
         
         # Gaming endpoints
@@ -519,89 +522,51 @@ class FlaskServer:
             except Exception as e:
                 logger.error(f"Error in /gaming/games: {e}")
                 return jsonify({"error": str(e)}), 500
-        
-        @self.app.route('/gaming/launch', methods=['POST'])
+
+        @self.app.route('/gaming/games', methods=['POST'])
         @self._require_auth
-        def launch_game_new():
-            """Launch a game using new endpoint format"""
+        def add_game():
+            """Add a new game mapping
+
+            Expected JSON body (one of):
+              { "label": "Name", "steam_appid": "12345" }
+              { "label": "Name", "exe_path": "C:\\path\\to\\game.exe" }
+            Returns the created mapping with an assigned `id`.
+            """
             if not self.settings_manager.get_setting('gaming.enabled', True):
-                return jsonify({
-                    "error": "Gaming endpoints are disabled",
-                    "details": "Enable gaming endpoints in settings"
-                }), 403
-            
-            if not self.gaming_controller:
-                return jsonify({"error": "Gaming controller not available"}), 500
-            
+                return jsonify({"error": "Gaming endpoints are disabled"}), 403
+
             try:
                 data = request.get_json()
                 if not data:
                     return jsonify({"error": "JSON body required"}), 400
-                
-                game_id = data.get('game_id')
-                if not game_id:
-                    return jsonify({"error": "Missing 'game_id' in request body"}), 400
-                
-                # Launch game by ID from mappings
-                mappings = self.settings_manager.get_gaming_mappings()
-                
-                # Find the game by ID
-                game_data = None
-                for game in mappings:
-                    if game.get('id') == game_id:
-                        game_data = game
-                        break
-                
-                if not game_data:
-                    return jsonify({"error": f"Game '{game_id}' not found in mappings"}), 404
-                
-                # Determine launch method
-                result = None
-                steam_appid = game_data.get('steam_appid', '').strip()
-                exe_path = game_data.get('exe_path', '').strip()
-                
-                if steam_appid:
-                    result = self.gaming_controller.launch_game_by_steam_id(steam_appid)
-                elif exe_path:
-                    result = self.gaming_controller.launch_game_by_executable(exe_path)
-                else:
-                    return jsonify({"error": "Game has no valid launch method configured"}), 400
-                
-                if result and result.get("ok"):
-                    # Apply fan config if configured for this game
-                    fan_profile = game_data.get('fan_profile', '').strip()
-                    if (fan_profile and self.fan_controller and 
-                        self.settings_manager.get_setting('fan.enabled', False)):
-                        try:
-                            fan_result = self.fan_controller.set_fan_profile(fan_profile)
-                            if fan_result["ok"]:
-                                logger.info(f"Applied fan config: {fan_profile}")
-                                result["fan_config_applied"] = fan_profile
-                        except Exception as e:
-                            logger.warning(f"Failed to apply fan config: {e}")
-                            result["fan_config_error"] = str(e)
-                    
-                    # Switch to game audio device if configured
-                    audio_device = game_data.get('audio_device', '').strip()
-                    if (audio_device and self.audio_controller and 
-                        self.settings_manager.get_setting('audio.enabled', True)):
-                        try:
-                            audio_mappings = self.settings_manager.get_audio_mappings()
-                            audio_result = self.audio_controller.switch_to_device_by_key(audio_device, audio_mappings)
-                            if audio_result["ok"]:
-                                logger.info(f"Switched to audio device: {audio_device}")
-                                result["audio_device_switched"] = audio_device
-                        except Exception as e:
-                            logger.warning(f"Failed to switch audio device: {e}")
-                            result["audio_switch_error"] = str(e)
-                    
-                    return jsonify(result)
-                else:
-                    error_msg = result.get("error", "Unknown error") if result else "Launch failed"
-                    return jsonify({"error": error_msg}), 500
-                    
+
+                label = data.get('label', '').strip()
+                steam_appid = data.get('steam_appid', '').strip()
+                exe_path = data.get('exe_path', '').strip()
+
+                if not label and not steam_appid and not exe_path:
+                    return jsonify({"error": "Require at least one of label, steam_appid, or exe_path"}), 400
+
+                # Create a new id for the game
+                new_id = str(uuid.uuid4())
+
+                # Load existing mappings and append
+                mappings = self.settings_manager.get_gaming_mappings() or []
+                new_game = {
+                    "id": new_id,
+                    "label": label,
+                    "steam_appid": steam_appid,
+                    "exe_path": exe_path
+                }
+
+                mappings.append(new_game)
+                # Persist mappings
+                self.settings_manager.set_gaming_mappings(mappings)
+
+                return jsonify({"ok": True, "game": new_game}), 201
             except Exception as e:
-                logger.error(f"Error in /gaming/launch: {e}")
+                logger.error(f"Error in POST /gaming/games: {e}")
                 return jsonify({"error": str(e)}), 500
         
         @self.app.route('/fan/apply', methods=['GET'])

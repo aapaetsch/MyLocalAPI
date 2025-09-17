@@ -22,8 +22,8 @@ import requests
 import json
 import logging
 
-from utils import AutostartManager, validate_executable, open_file_location
-from settings import SettingsManager
+from src.utils import AutostartManager, validate_executable, open_file_location
+from src.settings import SettingsManager
 
 logger = logging.getLogger(__name__)
 
@@ -309,17 +309,33 @@ class MainWindow:
             try:
                 if CTK_AVAILABLE:
                     try:
-                        base_dir = os.path.dirname(os.path.abspath(__file__))
-                        theme_path = os.path.join(base_dir, 'ctk_steel_blue_theme.json')
-                        if os.path.exists(theme_path):
+                        # Look for bundled theme under assets/themes first (works for dev and PyInstaller onefile)
+                        theme_candidates = [
+                            resource_path('assets', 'themes', 'ctk_steel_blue_theme.json'),
+                            resource_path('ctk_steel_blue_theme.json'),
+                            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ctk_steel_blue_theme.json')
+                        ]
+
+                        theme_found = None
+                        for theme_path in theme_candidates:
                             try:
-                                ctk.set_default_color_theme(theme_path)
+                                if theme_path and os.path.exists(theme_path):
+                                    theme_found = theme_path
+                                    break
                             except Exception:
-                                raise
-                        else:
-                            raise FileNotFoundError
-                    except Exception:
-                        try:
+                                # ignore inaccessible candidates
+                                continue
+
+                        if theme_found:
+                            try:
+                                ctk.set_default_color_theme(theme_found)
+                            except Exception as e:
+                                logger.debug(f"Failed to set CTk theme from {theme_found}: {e}")
+                                theme_found = None
+
+                        if not theme_found:
+                            # Fallback to programmatic theme object
+                            logger.debug('CTk theme file not found; using fallback color mapping')
                             theme_obj = {
                                 'color_primary': accent,
                                 'color_secondary': alt_bg,
@@ -332,10 +348,12 @@ class MainWindow:
                             }
                             try:
                                 ctk.set_default_color_theme(theme_obj)
-                            except Exception:
-                                pass
-                        except Exception:
-                            pass
+                            except Exception as e:
+                                logger.debug(f"Failed to apply fallback CTk theme object: {e}")
+                    except Exception as e:
+                        logger.debug(f"Error while attempting to load/apply CTk theme: {e}")
+            except Exception as e:
+                logger.debug(f"Could not apply CTk theme: {e}")
             except Exception:
                 pass
         except Exception as e:
@@ -408,71 +426,6 @@ class MainWindow:
                 pass
         except Exception:
             pass
-
-    def _create_custom_titlebar(self):
-        """Create a custom titlebar to replace the native one."""
-        try:
-            titlebar = tk.Frame(self.root, bg=self._app_bg, height=32)
-            titlebar.pack(fill=tk.X, side=tk.TOP)
-
-            if getattr(self, '_app_icon', None):
-                icon_label = tk.Label(titlebar, image=self._app_icon, bg=self._app_bg)
-                icon_label.pack(side=tk.LEFT, padx=(6, 6), pady=2)
-            else:
-                icon_label = tk.Label(titlebar, text=' ', bg=self._app_bg)
-                icon_label.pack(side=tk.LEFT, padx=(6, 6), pady=2)
-
-            # Title
-            title_label = tk.Label(titlebar, text=self.root.title(), bg=self._app_bg, fg=self._fg,
-                                   font=("TkDefaultFont", 10, "bold"))
-            title_label.pack(side=tk.LEFT, padx=(0, 6))
-
-            # Middle spacer
-            spacer = tk.Frame(titlebar, bg=self._app_bg)
-            spacer.pack(side=tk.LEFT, expand=True, fill=tk.X)
-
-            # Left-side Minimize button (per user request)
-            min_btn = tk.Button(titlebar, text='—', bg=self._field_bg, fg=self._fg,
-                                relief='flat', bd=0, width=3, command=self._minimize_window, cursor='hand2')
-            min_btn.pack(side=tk.LEFT, padx=(6, 4), pady=6)
-
-            # Close button on the right
-            close_btn = tk.Button(titlebar, text='✕', bg=self._field_bg, fg=self._fg,
-                                  relief='flat', bd=0, width=3, command=self._on_window_close, cursor='hand2')
-            close_btn.pack(side=tk.RIGHT, padx=(0, 6), pady=6)
-
-            # Hover effects for buttons
-            def _on_enter(btn):
-                try:
-                    btn.configure(bg=self._shade_color(self._field_bg, 12))
-                except Exception:
-                    pass
-
-            def _on_leave(btn):
-                try:
-                    btn.configure(bg=self._field_bg)
-                except Exception:
-                    pass
-
-            for b in (min_btn, close_btn):
-                b.bind('<Enter>', lambda e, btn=b: _on_enter(btn))
-                b.bind('<Leave>', lambda e, btn=b: _on_leave(btn))
-
-            # Enable dragging the window by the titlebar
-            for widget in (titlebar, title_label, icon_label):
-                widget.bind('<ButtonPress-1>', self._start_move)
-                widget.bind('<ButtonRelease-1>', self._stop_move)
-                widget.bind('<B1-Motion>', self._on_move)
-
-            self._titlebar_widgets = {
-                'frame': titlebar,
-                'title': title_label,
-                'icon': icon_label,
-                'min': min_btn,
-                'close': close_btn
-            }
-        except Exception as e:
-            logger.debug(f"Failed to create custom titlebar: {e}")
 
     # Window dragging helpers
     def _start_move(self, event):
@@ -740,11 +693,15 @@ class MainWindow:
 
         self._label(self.mappings_table, text="Label").grid(row=0, column=0, sticky="w", padx=(10, 10))
         self._label(self.mappings_table, text="Device ID").grid(row=0, column=1, sticky="w", padx=(6, 10))
-        self._label(self.mappings_table, text="Stream", font=None).grid(row=0, column=2, sticky="w", padx=(10,0))
+        self._label(self.mappings_table, text="Stream", font=None).grid(row=0, column=2, sticky="w", padx=(5,5))
         self._label(self.mappings_table, text="Game", font=None).grid(row=0, column=3, sticky="w")
         self._button(self.mappings_table, text="➕ Add", command=self._add_device_mapping, fg_color=self._success, text_color=self._app_bg, width=65, hover_color=self._accent_hover).grid(row=0, column=4, sticky="e", padx=(0,5), pady=(5,5))
 
-        self.mappings_table.columnconfigure(1, weight=1)
+        self.mappings_table.columnconfigure(0, weight=4)
+        self.mappings_table.columnconfigure(1, minsize=350)
+        self.mappings_table.columnconfigure(2, weight=0, minsize=50)
+        self.mappings_table.columnconfigure(3, weight=0, minsize=50)
+        self.mappings_table.columnconfigure(4, weight=2, minsize=60)
 
         self.mapping_rows = []
     
@@ -960,19 +917,25 @@ class MainWindow:
         endpoints_container = ctk.CTkScrollableFrame(self.endpoints_frame)
         endpoints_container.pack(fill=tk.BOTH, expand=True)
 
-        # Endpoint definitions - load from endpoints.json only (no fallback)
+        # Endpoint definitions - load from bundled static/endpoints.json using resource_path
         endpoints = []
         try:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            endpoints_path = os.path.join(base_dir, "endpoints.json")
+            # Prefer the bundled static path (works with PyInstaller --add-data bundling)
+            endpoints_path = resource_path('static', 'endpoints.json')
+            if not os.path.exists(endpoints_path):
+                # Fallback to legacy location next to module (development layout)
+                endpoints_path = resource_path('endpoints.json')
+
             with open(endpoints_path, "r", encoding="utf-8") as fh:
                 loaded = json.load(fh)
                 if isinstance(loaded, list):
                     endpoints = loaded
                 else:
-                    logger.debug("endpoints.json did not contain a list; using empty endpoints")
-        except Exception as e:
-            logger.debug(f"Could not load endpoints.json: {e}")
+                    # Keep endpoints empty if structure is unexpected
+                    pass
+        except Exception:
+            # Silent failure (keep behavior unchanged per request)
+            pass
 
         self.endpoint_widgets = []
 
@@ -1261,12 +1224,12 @@ class MainWindow:
             device_entry = ctk.CTkEntry(row_parent, textvariable=device_id_var)
             device_entry.grid(row=row_index, column=1, sticky="ew", padx=(5, 5), pady=2)
 
-        streaming_cb = ctk.CTkSwitch(row_parent, text="", variable=streaming_var, command=lambda: self._on_streaming_checkbox_changed(streaming_var))
+        streaming_cb = ctk.CTkSwitch(row_parent, text="", width=50, variable=streaming_var, command=lambda: self._on_streaming_checkbox_changed(streaming_var))
         # Center the streaming toggle in its column (no extra left-offset)
-        streaming_cb.grid(row=row_index, column=2, padx=0, pady=2)
+        streaming_cb.grid(row=row_index, column=2, padx=(5,5), pady=2)
 
         # Game switch - ensure single selection across rows
-        game_cb = ctk.CTkSwitch(row_parent, text="", variable=game_var, command=lambda gv=game_var: self._on_game_checkbox_changed(gv))
+        game_cb = ctk.CTkSwitch(row_parent, text="", width=50, variable=game_var, command=lambda gv=game_var: self._on_game_checkbox_changed(gv))
         game_cb.grid(row=row_index, column=3, padx=0, pady=2)
 
         delete_btn = ctk.CTkButton(row_parent, text="🗑 Delete", width=60, fg_color=getattr(self, '_danger', '#FC6A6A'), text_color=getattr(self, '_app_bg', '#1E1F2B'), hover_color=self._shade_color(getattr(self, '_danger', '#FC6A6A'), -10), command=lambda: None)
@@ -1274,9 +1237,11 @@ class MainWindow:
 
         # Ensure the middle column stretches
         try:
-            self.mappings_table.columnconfigure(1, weight=1)
-            self.mappings_table.columnconfigure(2, minsize=8)
-            self.mappings_table.columnconfigure(3, minsize=8)
+            self.mappings_table.columnconfigure(0, weight=4)
+            self.mappings_table.columnconfigure(1, minsize=350)
+            self.mappings_table.columnconfigure(2, weight=0, minsize=50)
+            self.mappings_table.columnconfigure(3, weight=0, minsize=50)
+            self.mappings_table.columnconfigure(4, weight=2, minsize=60)
         except Exception:
             pass
 

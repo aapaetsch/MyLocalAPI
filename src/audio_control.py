@@ -16,7 +16,7 @@ import csv
 import io
 import subprocess
 from typing import Dict, List, Optional, Tuple, Any
-from utils import find_bundled_executable, run_subprocess_safe, clean_audio_device_id
+from src.utils import find_bundled_executable, run_subprocess_safe, clean_audio_device_id
 
 logger = logging.getLogger(__name__)
 
