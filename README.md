@@ -1,4 +1,4 @@
-# My MyLocalAPI
+# MyLocalAPI
 
 - Author: Aidan Paetsch
 - Date: 2025-09-15
