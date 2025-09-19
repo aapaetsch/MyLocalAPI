@@ -7,6 +7,12 @@
 
 **MyLocalAPI** is a lightweight local HTTP server for Windows PC control. It provides REST endpoints for switching audio outputs, controlling volume, launching streaming services, and managing fan control profiles. The application features a system tray icon and a Tkinter GUI for configuration.
 
+## Changelog
+
+### v1.0.5
+- API: `/list` now returns an additional `labels` array containing the configured device mapping labels. These labels can be passed as `key=<label>` to the `/audio/device/switch` endpoint to switch to a mapped device.
+
+
 ## Features
 
 - **Gaming Control**: Launch games with Steam AppID or executable path, apply fan profiles and audio switching
