@@ -391,107 +391,7 @@ class MainWindow:
             return f"#{r2:02x}{g2:02x}{b2:02x}"
         except Exception:
             return hex_color
-
-    def _on_button_enter(self, event):
-        """Class-level enter handler for Buttons to show pointer cursor and hover style."""
-        try:
-            widget = event.widget
-            try:
-                is_disabled = False
-                try:
-                    is_disabled = (widget.cget('state') == 'disabled')
-                except Exception:
-                    try:
-                        # Some widgets expose 'instate'
-                        is_disabled = widget.instate(['disabled'])
-                    except Exception:
-                        is_disabled = False
-                if not is_disabled:
-                    try:
-                        widget.configure(cursor='hand2')
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-        except Exception:
-            pass
-
-    def _on_button_leave(self, event):
-        """Class-level leave handler for Buttons to restore style and cursor."""
-        try:
-            widget = event.widget
-            try:
-                widget.configure(cursor='')
-            except Exception:
-                pass
-        except Exception:
-            pass
-
-    # Window dragging helpers
-    def _start_move(self, event):
-        try:
-            self._x_offset = event.x
-            self._y_offset = event.y
-            # Set a grab/move cursor on titlebar widgets while dragging
-            try:
-                prev = {}
-                widgets = getattr(self, '_titlebar_widgets', {})
-                for name, w in widgets.items():
-                    # store previous cursor to restore later
-                    try:
-                        prev[name] = w.cget('cursor')
-                    except Exception:
-                        prev[name] = ''
-                    try:
-                        w.configure(cursor='trek')
-                    except Exception:
-                        pass
-                self._titlebar_prev_cursors = prev
-            except Exception:
-                pass
-        except Exception:
-            self._x_offset = 0
-            self._y_offset = 0
-
-    def _stop_move(self, event):
-        try:
-            prev = getattr(self, '_titlebar_prev_cursors', None)
-            widgets = getattr(self, '_titlebar_widgets', {})
-            if prev:
-                for name, w in widgets.items():
-                    try:
-                        orig = prev.get(name, '')
-                        w.configure(cursor=orig if orig else '')
-                    except Exception:
-                        pass
-                try:
-                    del self._titlebar_prev_cursors
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        self._x_offset = None
-        self._y_offset = None
-
-    def _on_move(self, event):
-        try:
-            x = event.x_root - self._x_offset
-            y = event.y_root - self._y_offset
-            self.root.geometry(f'+{x}+{y}')
-        except Exception:
-            pass
-
-    def _minimize_window(self):
-        """Minimize to tray (withdraw)."""
-        try:
-            self.root.withdraw()
-        except Exception:
-            try:
-                self.root.iconify()
-            except Exception:
-                pass
-    
+   
     def _create_widgets(self):
         """Create all GUI widgets"""
         # Use CTkFrame as main container
@@ -2056,7 +1956,6 @@ class MainWindow:
             logger.error(f"Error refreshing fan configs: {e}")
             messagebox.showerror("Error", f"Failed to refresh fan configs: {str(e)}")
 
-    
     def _auto_detect_appletv(self):
         """Auto-detect Apple TV moniker"""
         try:

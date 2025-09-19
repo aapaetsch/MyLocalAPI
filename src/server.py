@@ -700,10 +700,20 @@ class FlaskServer:
             try:
                 result = self.audio_controller.get_playback_devices()
                 if result["ok"]:
+                    # In addition to the device list, include any configured
+                    # mapping labels the user can pass as 'key' to
+                    # /audio/device/switch. These are pulled from settings.
+                    try:
+                        mappings = self.settings_manager.get_audio_mappings() or []
+                        labels = [m.get('label') for m in mappings if m.get('label')]
+                    except Exception:
+                        labels = []
+
                     return jsonify({
                         "ok": True,
                         "devices": result["devices"],
-                        "total": result["total"]
+                        "total": result["total"],
+                        "labels": labels
                     })
                 else:
                     return jsonify({

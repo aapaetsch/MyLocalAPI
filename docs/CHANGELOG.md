@@ -1,6 +1,10 @@
 # Changelog
 
 All notable changes to this project are documented in this file.
+ 
+## [1.0.5] - 2025-09-18
+### Added
+- API: `/list` now returns an additional `labels` array containing the configured device mapping labels. These labels can be passed as `key=<label>` to the `/audio/device/switch` endpoint to switch to a mapped device.
 
 ## [1.0.4] - 2025-09-17
 ### Launched
@@ -100,3 +104,5 @@ All notable changes to this project are documented in this file.
 ---
 
 For changes after v0.1.0, add entries above under the `Unreleased` or next version heading.
+
+
