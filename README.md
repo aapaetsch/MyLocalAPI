@@ -1,4 +1,4 @@
-# My MyLocalAPI
+# MyLocalAPI
 
 - Author: Aidan Paetsch
 - Date: 2025-09-15
@@ -409,54 +409,6 @@ python -m pytest tests/
 python tests/manual_qa.py
 ```
 
-## Manual QA Checklist
-
-Execute these tests before release:
-
-### Basic Functionality
-- [ ] 1. Start app, set Port (1482) and Token, start server
-- [ ] 2. Verify `http://127.0.0.1:1482/` responds with JSON status  
-- [ ] 3. Call `/device/current` and `/volume/current` - verify JSON response
-- [ ] 4. Add device mapping with label "headphones" and valid device ID
-- [ ] 5. Call `/switch?key=headphones&token=<token>` - verify success response
-- [ ] 6. Toggle audio control OFF - verify endpoints return disabled responses
-
-### GUI and Tray
-- [ ] 7. Verify tray menu shows Port: 1482 and Start/Stop states correctly
-- [ ] 8. Test "Open MyLocalAPI" opens default browser to server root
-- [ ] 9. Left-click tray icon opens/focuses GUI window
-- [ ] 10. Test server Start/Stop/Restart buttons in both GUI and tray
-
-### System Integration  
-- [ ] 11. Toggle "Launch on startup" - verify registry entry created/removed
-- [ ] 12. Test settings Export/Import functionality
-- [ ] 13. Test settings Reset to Defaults
-
-### Streaming Services
-- [ ] 14. Enable streaming endpoint, test `/openStreaming?service=youtube&token=<token>`
-- [ ] 15. Disable streaming endpoint, verify returns disabled response
-- [ ] 16. Configure "Use for streaming" on a device mapping, verify audio switches
-
-### Fan Control (if available)
-- [ ] 17. Configure fan paths, enable fan control
-- [ ] 18. Test `/fan/configs` returns available configurations  
-- [ ] 19. Test `/fan/apply?percent=50&token=<token>` applies closest config
-- [ ] 20. Enable "Apply on stream launch", verify fan config applies with streaming
-
-### Packaging Test
-- [ ] 21. Build with PyInstaller: `pyinstaller --onefile main.py`
-- [ ] 22. Run generated exe on clean Windows 10/11 VM
-- [ ] 23. Verify bundled svcl.exe is present and endpoints function
-- [ ] 24. Test tray icon, GUI, and server functionality in packaged version
-
-### Error Handling
-- [ ] 25. Try starting server on port already in use - verify clear error
-- [ ] 26. Test with invalid token - verify 401 responses  
-- [ ] 27. Test with missing/invalid device IDs - verify graceful error handling
-- [ ] 28. Test GUI responsiveness during server operations
-
-All tests should pass before considering the application ready for release.
-
 ## AS IS Disclaimer
 
 MyLocalAPI is provided "AS IS", without warranty of any kind. Use of this software, included scripts, bundled utilities, or pre-built executables is at your own risk. The authors and contributors disclaim all warranties, express or implied, including but not limited to warranties of merchantability, fitness for a particular purpose, security, and non-infringement.
@@ -468,13 +420,6 @@ Third-party tools (e.g., svcl.exe, FanControl.exe, browsers) are provided and ma
 ## License
 
 This project is licensed under the GNU General Public License v3.0 - see the LICENSE file for details.
-
-## Support
-
-For issues, feature requests, or questions:
-- GitHub Issues: <repository-url>/issues
-- Documentation: This README and inline code comments
-- Logs: Check `%APPDATA%\MyLocalAPI\mylocalapi.log` for debugging
 
 ## Acknowledgments
 - **NirSoft** for SoundVolumeCommandLine tool
