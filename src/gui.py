@@ -22,8 +22,11 @@ import requests
 import json
 import logging
 
+
 from src.utils import AutostartManager, validate_executable, open_file_location
 from src.settings import SettingsManager
+from src.win_dpi_mixin import SmoothMoveMixin
+
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +41,7 @@ def resource_path(*relative_parts):
     return os.path.join(base, *relative_parts)
 
 
-class MainWindow:
+class MainWindow(SmoothMoveMixin):
     # Class-level default palette (can be overridden per-instance)
     APP_BG = "#1E1F2B"
     ALT_BG = "#282A3A"
@@ -68,6 +71,9 @@ class MainWindow:
         self._accent_hover = self.ACCENT_HOVER
         self._disabled_btn_bg = self.DISABLED_BTN_BG
         self._disabled_btn_fg = self.DISABLED_BTN_FG
+        self._heavy_containers = []
+        self._status_timer_job = None
+        self._install_winmsg_hook()
         
         # GUI state variables
         self.port_var = tk.StringVar()
@@ -97,12 +103,28 @@ class MainWindow:
         
         self._setup_window()
         self._create_widgets()
+        try:
+            self._heavy_containers.extend([
+                getattr(self, 'settings_frame', None),
+                getattr(self, 'endpoints_frame', None),
+            ])
+        except Exception:
+            pass
         self._load_settings()
         self._setup_bindings()
         
         # Start status update timer
-        self.root.after(1000, self._update_status_timer)
+        self._status_timer_job = self.root.after(1000, self._update_status_timer)
 
+    # override: do image/font swaps here (once per DPI)
+    def _heavy_relayout(self, dpi):
+        # example: just show a blip in your status bar
+        try:
+            self.status_message_var.set(f"Reflow complete (dpi={dpi or 'unknown'})")
+            self.root.after(1000, lambda: self.status_message_var.set(""))
+        except Exception:
+            pass
+        
     # Helper factory methods to reduce repeated CTk fallbacks
     def _frame(self, parent, **pack_kwargs):
         # Use CustomTkinter frame (CTk will be bundled)
@@ -475,12 +497,15 @@ class MainWindow:
 
         self.notebook.add("Settings")
         self.notebook.add("Endpoints")
+        self.notebook.add("Logs")
 
         self.settings_frame = self.notebook.tab("Settings")
         self.endpoints_frame = self.notebook.tab("Endpoints")
+        self.logs_frame = self.notebook.tab("Logs")
 
         self._create_settings_tab()
         self._create_endpoints_tab()
+        self._create_logs_tab()
 
     def _attach_mousewheel(self, canvas: tk.Canvas, widget: tk.Widget):
         """Attach cross-platform mousewheel scrolling when pointer is over widget/canvas.
@@ -597,7 +622,7 @@ class MainWindow:
         self._label(self.mappings_table, text="Game", font=None).grid(row=0, column=3, sticky="w")
         self._button(self.mappings_table, text="➕ Add", command=self._add_device_mapping, fg_color=self._success, text_color=self._app_bg, width=65, hover_color=self._accent_hover).grid(row=0, column=4, sticky="e", padx=(0,5), pady=(5,5))
 
-        self.mappings_table.columnconfigure(0, weight=4)
+        self.mappings_table.columnconfigure(0, weight=4, minsize=80)
         self.mappings_table.columnconfigure(1, minsize=350)
         self.mappings_table.columnconfigure(2, weight=0, minsize=50)
         self.mappings_table.columnconfigure(3, weight=0, minsize=50)
@@ -906,6 +931,55 @@ class MainWindow:
                 endpoint["result_text"] = self.endpoints_result_text
 
         self.endpoints_result_text.pack(fill=tk.X, padx=(10, 20), pady=(2, 0))
+    
+    def _create_logs_tab(self):
+        """Create logs tab content"""
+        # Create main container for logs tab
+        logs_container = ctk.CTkFrame(self.logs_frame)
+        logs_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Create header with title and refresh button
+        header_frame = ctk.CTkFrame(logs_container)
+        header_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+
+        # Title
+        title_label = ctk.CTkLabel(header_frame, text="Application Logs", 
+                                 font=("TkDefaultFont", 16, "bold"), 
+                                 text_color=self._fg)
+        title_label.pack(side=tk.LEFT, padx=10, pady=5)
+
+        # Refresh button
+        refresh_btn = ctk.CTkButton(header_frame, text="🔄 Refresh", 
+                                  command=self._refresh_logs,
+                                  fg_color=self._accent, 
+                                  text_color=self._app_bg,
+                                  width=100)
+        refresh_btn.pack(side=tk.RIGHT, padx=10, pady=5)
+
+        # Create scrollable text area for logs
+        self.logs_textbox = ctk.CTkTextbox(logs_container, 
+                                         font=("Consolas", 11),
+                                         wrap=tk.WORD)
+        self.logs_textbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=(5, 10))
+
+        # Load logs initially, but defer the actual refresh so bottom controls
+        # (which create `status_message_var`) have a chance to be created.
+        # If for some reason the var isn't present yet, create a safe placeholder.
+        if not hasattr(self, 'status_message_var'):
+            try:
+                self.status_message_var = tk.StringVar()
+            except Exception:
+                # If tkinter isn't ready for StringVar creation, ignore and
+                # allow _refresh_logs to handle missing var gracefully.
+                pass
+
+        try:
+            # Schedule shortly after initialization so that the bottom
+            # controls are created and any status widgets exist.
+            self.root.after(50, self._refresh_logs)
+        except Exception:
+            # Fallback: call directly if scheduling fails for any reason.
+            self._refresh_logs()
                     
     def _create_bottom_controls(self, parent):
         """Create bottom control buttons"""
@@ -1137,7 +1211,7 @@ class MainWindow:
 
         # Ensure the middle column stretches
         try:
-            self.mappings_table.columnconfigure(0, weight=4)
+            self.mappings_table.columnconfigure(0, weight=4, minsize=80)
             self.mappings_table.columnconfigure(1, minsize=350)
             self.mappings_table.columnconfigure(2, weight=0, minsize=50)
             self.mappings_table.columnconfigure(3, weight=0, minsize=50)
@@ -2097,6 +2171,155 @@ class MainWindow:
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to copy cURL: {str(e)}")
+    
+    def _refresh_logs(self):
+        """Refresh and display log file contents"""
+        try:
+            # Clear current content
+            self.logs_textbox.delete(1.0, tk.END)
+            
+            # Find log files - try common locations
+            log_paths = []
+            
+            # Try to get the configured log file from the app's logger
+            try:
+                # Check if logger has file handlers with log file paths
+                for handler in logging.getLogger().handlers:
+                    if hasattr(handler, 'baseFilename'):
+                        log_paths.append(handler.baseFilename)
+                
+                # Also check our specific logger
+                app_logger = logging.getLogger(__name__.split('.')[0])  # Get root module logger
+                for handler in app_logger.handlers:
+                    if hasattr(handler, 'baseFilename'):
+                        log_paths.append(handler.baseFilename)
+            except Exception:
+                pass
+            
+            # Try common log file locations
+            common_paths = [
+                'mylocalapi.log',
+                'app.log',
+                'application.log',
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'mylocalapi.log'),
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'app.log'),
+                os.path.join(tempfile.gettempdir(), 'mylocalapi.log'),
+                os.path.join(os.path.expanduser('~'), '.mylocalapi', 'mylocalapi.log')
+            ]
+            
+            log_paths.extend(common_paths)
+
+            # Also look in the user's Roaming AppData for MyLocalAPI logs
+            try:
+                appdata = os.getenv('APPDATA') or os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming')
+                if appdata:
+                    roaming_app_dir = os.path.join(appdata, 'MyLocalAPI')
+                    if os.path.isdir(roaming_app_dir):
+                        # Add common filenames in that folder
+                        for name in ('mylocalapi.log', 'app.log', 'application.log'):
+                            candidate = os.path.join(roaming_app_dir, name)
+                            if candidate not in log_paths:
+                                log_paths.append(candidate)
+
+                        # Also include any .log files present in the folder
+                        try:
+                            for fname in os.listdir(roaming_app_dir):
+                                if fname.lower().endswith('.log'):
+                                    candidate = os.path.join(roaming_app_dir, fname)
+                                    if candidate not in log_paths:
+                                        log_paths.append(candidate)
+                        except Exception:
+                            # Ignore listing errors (permission, etc.)
+                            pass
+            except Exception:
+                pass
+            
+            # Remove duplicates while preserving order
+            unique_log_paths = []
+            for path in log_paths:
+                if path and path not in unique_log_paths:
+                    unique_log_paths.append(path)
+            
+            log_content = ""
+            logs_found = False
+            files_exist = 0
+
+            # Try to read from each potential log file
+            for log_path in unique_log_paths:
+                try:
+                    if os.path.exists(log_path) and os.path.isfile(log_path):
+                        files_exist += 1
+                        # Mark as found even if the file is empty; we'll show a helpful note
+                        if logs_found:
+                            log_content += f"\n\n{'=' * 60}\n"
+                            log_content += f"LOG FILE: {log_path}\n"
+                            log_content += f"{'=' * 60}\n\n"
+                        else:
+                            log_content += f"LOG FILE: {log_path}\n"
+                            log_content += f"{'=' * 60}\n\n"
+
+                        try:
+                            with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
+                                content = f.read()
+                        except Exception:
+                            content = None
+
+                        if content:
+                            # Show last 5000 lines to avoid overwhelming the UI
+                            lines = content.split('\n')
+                            if len(lines) > 5000:
+                                log_content += f"... (showing last 5000 of {len(lines)} lines) ...\n\n"
+                                log_content += '\n'.join(lines[-5000:])
+                            else:
+                                log_content += content
+                        else:
+                            # File exists but is empty or unreadable
+                            log_content += "<file is empty or unreadable>\n"
+
+                        logs_found = True
+                except Exception:
+                    # Skip files we can't access
+                    continue
+
+            if not logs_found:
+                # No files existed at all
+                log_content = "No log files found.\n\n"
+                log_content += "Searched locations:\n"
+                for path in unique_log_paths:
+                    exists = "✓" if os.path.exists(path) else "✗"
+                    log_content += f"{exists} {path}\n"
+                log_content += "\nNote: Logs may be written to console only, or to a different location."
+            elif not files_exist:
+                # Defensive fallback: should not be reached because logs_found implies files_exist
+                log_content = "No log files found.\n\n"
+                log_content += "Searched locations:\n"
+                for path in unique_log_paths:
+                    exists = "✓" if os.path.exists(path) else "✗"
+                    log_content += f"{exists} {path}\n"
+                log_content += "\nNote: Logs may be written to console only, or to a different location."
+            
+            # Insert content into textbox
+            self.logs_textbox.insert(1.0, log_content)
+            
+            # Scroll to the bottom to show most recent logs
+            self.logs_textbox.see(tk.END)
+            
+            # Update status message
+            if logs_found:
+                self.status_message_var.set("Logs refreshed")
+            else:
+                self.status_message_var.set("No log files found")
+            
+            # Clear status message after 2 seconds
+            self.root.after(2000, lambda: self.status_message_var.set(""))
+            
+        except Exception as e:
+            error_msg = f"Error loading logs: {str(e)}"
+            self.logs_textbox.delete(1.0, tk.END)
+            self.logs_textbox.insert(1.0, error_msg)
+            self.status_message_var.set("Error loading logs")
+            self.root.after(2000, lambda: self.status_message_var.set(""))
+            logger.error(f"Error in _refresh_logs: {e}")
     
     def update_server_status(self):
         """Update server status display"""
