@@ -395,6 +395,7 @@ def main():
             lock_file = os.path.join(tempfile.gettempdir(), 'mylocalapi.lock')
             lock_handle = os.open(lock_file, os.O_CREAT | os.O_TRUNC | os.O_RDWR)
             msvcrt.locking(lock_handle, msvcrt.LK_NBLCK, 1)
+            ctypes.windll.user32.SetProcessDpiAwarenessContext(wintypes.HANDLE(-4))
         except (OSError, IOError):
             messagebox.showerror("Already Running", 
                                "MyLocalAPI is already running. Check your system tray.")
