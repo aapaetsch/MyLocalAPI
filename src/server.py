@@ -99,23 +99,15 @@ class FlaskServer:
                 "service": "MyLocalAPI",
                 "status": "running",
                 "endpoints": [
-                    "/audio/device/switch", "/volume", "/volume/current", "/audio/device/current",
+                    "/audio/switch", "/audio/volume", "/audio/devices", "/audio/set_default", "/audio/current", "/audio/list",
                     "/streaming/launch", "/gaming/games", "/gaming/launch",
                     "/fan/apply", "/fan/refresh", "/fan/configs", "/fan/status", 
-                    "/list", "/status", "/diag", "/health"
+                    "/status", "/diag", "/health"
                 ]
             })
         
-        @self.app.route('/health', methods=['GET'])
-        def health_check():
-            """Health check endpoint (no auth required)"""
-            return jsonify({
-                "status": "healthy",
-                "service": "MyLocalAPI",
-                "version": APP_VERSION
-            })
-        
-        @self.app.route('/audio/device/switch', methods=['GET'])
+        # ----- Audio Endpoints -----
+        @self.app.route('/audio/switch', methods=['GET'])
         @self._require_auth
         def switch_device():
             """Switch audio device"""
@@ -151,10 +143,10 @@ class FlaskServer:
                     return jsonify({"error": "Missing 'key' or 'id' parameter"}), 400
                     
             except Exception as e:
-                logger.error(f"Error in /audio/device/switch: {e}")
+                logger.error(f"Error in /audio/switch: {e}")
                 return jsonify({"error": str(e)}), 500
         
-        @self.app.route('/volume', methods=['GET'])
+        @self.app.route('/audio/volume', methods=['GET'])
         @self._require_auth
         def set_volume():
             """Set device volume"""
@@ -183,80 +175,6 @@ class FlaskServer:
                 return jsonify({"error": "Invalid percent value"}), 400
             except Exception as e:
                 logger.error(f"Error in /volume: {e}")
-                return jsonify({"error": str(e)}), 500
-        
-        @self.app.route('/volume/current', methods=['GET'])
-        @self._require_auth
-        def get_current_volume():
-            """Get current volume"""
-            if not self.settings_manager.get_setting('audio.enabled', True):
-                return jsonify({"error": "Audio control is disabled"}), 403
-            
-            if not self.audio_controller:
-                return jsonify({"error": "Audio controller not available"}), 500
-            
-            try:
-                mappings = self.settings_manager.get_audio_mappings()
-                snapshot = self.audio_controller.get_audio_snapshot(mappings)
-                
-                if snapshot["ok"]:
-                    return jsonify({
-                        "ok": True,
-                        "deviceVolume": snapshot["volume"],
-                        "systemVolume": snapshot["volume"],
-                        "active": {
-                            "deviceId": snapshot["device_id"],
-                            "activeKey": snapshot["active_key"],
-                            "matched": snapshot["matched"],
-                            "deviceName": snapshot["device_name"],
-                            "name": snapshot["name"]
-                        }
-                    })
-                else:
-                    return jsonify({
-                        "error": "Could not get volume",
-                        "reason": snapshot.get("reason", "unknown")
-                    }), 500
-                    
-            except Exception as e:
-                logger.error(f"Error in /volume/current: {e}")
-                return jsonify({"error": str(e)}), 500
-        
-        @self.app.route('/audio/device/current', methods=['GET'])
-        @self._require_auth
-        def get_current_device():
-            """Get current default device"""
-            if not self.settings_manager.get_setting('audio.enabled', True):
-                return jsonify({"error": "Audio control is disabled"}), 403
-            
-            if not self.audio_controller:
-                return jsonify({"error": "Audio controller not available"}), 500
-            
-            try:
-                mappings = self.settings_manager.get_audio_mappings()
-                snapshot = self.audio_controller.get_audio_snapshot(mappings)
-                
-                if snapshot["ok"]:
-                    return jsonify({
-                        "ok": True,
-                        "deviceId": snapshot["device_id"],
-                        "activeKey": snapshot["active_key"],
-                        "matched": snapshot["matched"],
-                        "deviceName": snapshot["device_name"],
-                        "name": snapshot["name"],
-                        "volumes": {
-                            "deviceVolume": snapshot["volume"],
-                            "systemVolume": snapshot["volume"]
-                        }
-                    })
-                else:
-                    return jsonify({
-                        "error": "Could not resolve default device",
-                        "reason": snapshot.get("reason", "unknown")
-                    }), 500
-                    
-            except Exception as e:
-                logger.error(f"Error in /audio/device/current: {e}")
                 return jsonify({"error": str(e)}), 500
         
         # Additional audio endpoints
@@ -356,7 +274,48 @@ class FlaskServer:
                 logger.error(f"Error in /audio/current: {e}")
                 return jsonify({"error": str(e)}), 500
         
-        @self.app.route('/openStreaming', methods=['GET'])
+        @self.app.route('/audio/list', methods=['GET'])
+        @self._require_auth
+        def list_devices():
+            """List audio devices"""
+            if not self.settings_manager.get_setting('audio.enabled', True):
+                return jsonify({"error": "Audio control is disabled"}), 403
+            
+            if not self.audio_controller:
+                return jsonify({"error": "Audio controller not available"}), 500
+            
+            try:
+                result = self.audio_controller.get_playback_devices()
+                if result["ok"]:
+                    # In addition to the device list, include any configured
+                    # mapping labels the user can pass as 'key' to
+                    # /audio/device/switch. These are pulled from settings.
+                    try:
+                        mappings = self.settings_manager.get_audio_mappings() or []
+                        labels = [m.get('label') for m in mappings if m.get('label')]
+                    except Exception:
+                        labels = []
+
+                    return jsonify({
+                        "ok": True,
+                        "devices": result["devices"],
+                        "total": result["total"],
+                        "labels": labels
+                    })
+                else:
+                    return jsonify({
+                        "ok": False,
+                        "message": "Failed to get devices",
+                        "error": result.get("error", "Unknown error"),
+                        "total": 0
+                    })
+                    
+            except Exception as e:
+                logger.error(f"Error in /list: {e}")
+                return jsonify({"error": str(e)}), 500
+        
+        # ----- Streaming Endpoints -----
+        @self.app.route('/streaming/launch', methods=['GET'])
         @self._require_auth
         def open_streaming():
             """Open streaming service"""
@@ -404,26 +363,10 @@ class FlaskServer:
                     return jsonify({"error": "Streaming controller not available"}), 500
                     
             except Exception as e:
-                logger.error(f"Error in /openStreaming: {e}")
+                logger.error(f"Error in /streaming/launch: {e}")
                 return jsonify({"error": str(e)}), 500
         
-        @self.app.route('/streaming/launch', methods=['GET'])
-        @self._require_auth
-        def launch_streaming():
-            """Launch streaming service (alternative endpoint)"""
-            if not self.settings_manager.get_setting('streaming.launch_streaming_by_endpoint', True):
-                return jsonify({
-                    "error": "Streaming service endpoint is disabled",
-                    "details": "Enable 'Launch Streaming service by endpoint' in settings"
-                }), 403
-            
-            service = request.args.get('service')
-            if not service:
-                return jsonify({"error": "Missing 'service' parameter"}), 400
-            
-            # Delegate to the existing openStreaming logic (open_streaming reads showID itself)
-            return open_streaming()
-        
+        # ----- Gaming Endpoints -----
         @self.app.route('/gaming/launch', methods=['GET'])
         @self._require_auth
         def launch_game():
@@ -504,7 +447,6 @@ class FlaskServer:
                 logger.error(f"Error in /gaming/launch: {e}")
                 return jsonify({"error": str(e)}), 500
         
-        # Gaming endpoints
         @self.app.route('/gaming/games', methods=['GET'])
         @self._require_auth
         def get_games():
@@ -569,6 +511,7 @@ class FlaskServer:
                 logger.error(f"Error in POST /gaming/games: {e}")
                 return jsonify({"error": str(e)}), 500
         
+        # ----- Fan Control Endpoints -----
         @self.app.route('/fan/apply', methods=['GET'])
         @self._require_auth
         def apply_fan_config():
@@ -687,45 +630,15 @@ class FlaskServer:
                 logger.error(f"Error in /fan/status: {e}")
                 return jsonify({"error": str(e)}), 500
         
-        @self.app.route('/list', methods=['GET'])
-        @self._require_auth
-        def list_devices():
-            """List audio devices"""
-            if not self.settings_manager.get_setting('audio.enabled', True):
-                return jsonify({"error": "Audio control is disabled"}), 403
-            
-            if not self.audio_controller:
-                return jsonify({"error": "Audio controller not available"}), 500
-            
-            try:
-                result = self.audio_controller.get_playback_devices()
-                if result["ok"]:
-                    # In addition to the device list, include any configured
-                    # mapping labels the user can pass as 'key' to
-                    # /audio/device/switch. These are pulled from settings.
-                    try:
-                        mappings = self.settings_manager.get_audio_mappings() or []
-                        labels = [m.get('label') for m in mappings if m.get('label')]
-                    except Exception:
-                        labels = []
-
-                    return jsonify({
-                        "ok": True,
-                        "devices": result["devices"],
-                        "total": result["total"],
-                        "labels": labels
-                    })
-                else:
-                    return jsonify({
-                        "ok": False,
-                        "message": "Failed to get devices",
-                        "error": result.get("error", "Unknown error"),
-                        "total": 0
-                    })
-                    
-            except Exception as e:
-                logger.error(f"Error in /list: {e}")
-                return jsonify({"error": str(e)}), 500
+        # ----- General Endpoints -----
+        @self.app.route('/health', methods=['GET'])
+        def health_check():
+            """Health check endpoint (no auth required)"""
+            return jsonify({
+                "status": "healthy",
+                "service": "MyLocalAPI",
+                "version": APP_VERSION
+            })
         
         @self.app.route('/status', methods=['GET'])
         @self._require_auth

@@ -4,31 +4,31 @@
     "enabled_setting": "audio.enabled",
     "endpoints": [
       {
-        "path": "/audio/device/switch",
+        "path": "/audio/switch",
         "method": "GET",
         "params": "key=<label>&token=<token> OR id=<device_id>&token=<token>",
-        "description": "Switch default audio device",
+        "description": "Switch default audio device by mapped label (key) or direct device id (id)",
         "test_params": "key=headphones"
       },
       {
-        "path": "/volume",
+        "path": "/audio/volume",
         "method": "GET",
         "params": "percent=<0-100>&token=<token>",
         "description": "Set system volume percentage",
         "test_params": "percent=50"
       },
       {
-        "path": "/volume/current",
+        "path": "/audio/volume/current",
         "method": "GET",
         "params": "token=<token>",
         "description": "Get current volume and device info",
         "test_params": ""
       },
       {
-        "path": "/audio/device/current",
+        "path": "/audio/current",
         "method": "GET",
         "params": "token=<token>",
-        "description": "Get current default device info",
+        "description": "Get current default device and active mapping info",
         "test_params": ""
       },
       {
@@ -53,10 +53,10 @@
         "test_params": ""
       },
       {
-        "path": "/list",
+        "path": "/audio/list",
         "method": "GET",
         "params": "token=<token>",
-        "description": "List all playback devices",
+        "description": "List all playback devices. Includes configured mapping labels in the response under 'labels' (useable with /audio/switch?key=<label>)",
         "test_params": ""
       }
     ]
@@ -82,7 +82,7 @@
         "path": "/gaming/launch",
         "method": "GET",
         "params": "label=<game_label>&token=<token> OR steamid=<steam_app_id>&token=<token> OR path=<exe_path>&token=<token>",
-        "description": "Launch a game by label, Steam App ID, or executable path",
+        "description": "Launch a game by label, Steam App ID (steamid), or executable path",
         "test_params": "label=Example Game"
       },
       {
@@ -95,9 +95,9 @@
       {
         "path": "/gaming/games",
         "method": "POST",
-        "params": "label=<label>&steam_appid=<steam_appid>&token=<token> OR exe_path=<path>&token=<token>",
-        "description": "Add a new game mapping (provide label and at least one of steam_appid or exe_path)",
-        "test_params": "label=New Game&steam_appid=12345"
+        "params": "JSON body { \"label\": \"name\", \"steam_appid\": \"<steam_appid>\" OR \"exe_path\": \"C:\\\\path\\\\to\\\\exe\" } & token in query",
+        "description": "Add a new game mapping (POST JSON with 'label' and at least one of 'steam_appid' or 'exe_path')",
+        "test_params": "{ \"label\": \"New Game\", \"steam_appid\": \"12345\" }"
       }
     ]
   },
