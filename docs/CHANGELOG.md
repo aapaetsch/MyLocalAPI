@@ -24,9 +24,7 @@ All notable changes to this project are (probably) documented in this file.
 - [Fixed]: GUI endpoints loader updated to use `resource_path('static','endpoints.json')` so the Endpoints tab loads correctly from both dev and PyInstaller onefile builds.
  - Make resource lookups more resilient for one-file builds: theme and static file resolution now uses the same `resource_path` strategy so packaged assets (themes, `static/endpoints.json`) are discovered reliably at runtime.
 - [Added]: Optional `showID` query parameter for streaming launch endpoints (`/streaming/launch`, `/openStreaming`). When provided, supported services will open the show's info/detail page directly (Netflix, Prime Video, Crunchyroll). The server forwards `showID` to `StreamingController.launch_service(service, show_id)` and the controller constructs service-specific URLs (e.g., `https://www.netflix.com/title/{showID}`).
-
 - [Changed]: `StreamingController` updated to accept an optional `show_id` parameter and to construct service-specific deep links when `showID` is provided (Netflix, Prime Video, Crunchyroll). This improves launch behavior for services that support direct title links and is documented in `static/endpoints.json`.
-
 - [Verification]: Updated `static/endpoints.json` to document the optional `showID` parameter for `/streaming/launch` and ran import smoke-tests for modified modules.
 
 ### Notes

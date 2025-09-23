@@ -18,20 +18,6 @@
         "test_params": "percent=50"
       },
       {
-        "path": "/audio/volume/current",
-        "method": "GET",
-        "params": "token=<token>",
-        "description": "Get current volume and device info",
-        "test_params": ""
-      },
-      {
-        "path": "/audio/current",
-        "method": "GET",
-        "params": "token=<token>",
-        "description": "Get current default device and active mapping info",
-        "test_params": ""
-      },
-      {
         "path": "/audio/devices",
         "method": "GET",
         "params": "token=<token>",
