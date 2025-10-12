@@ -329,10 +329,6 @@ If FanControl.exe provides a `--list-configs` or similar option, it should be us
 
 - [ ] Linux/macOS support using platform-specific audio APIs
 - [ ] Native Windows Audio API integration (bypass svcl.exe dependency)  
-- [ ] Plugin system for additional hardware control
-- [ ] Web dashboard interface
-- [ ] Mobile app integration
-- [ ] Voice control integration (Alexa/Google Assistant)
 
 ## Troubleshooting
 
